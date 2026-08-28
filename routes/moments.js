@@ -75,7 +75,14 @@ router.post('/generate', optionalAuth, async (req, res, next) => {
 
 router.get('/:id', optionalAuth, async (req, res, next) => {
   try {
-    const itinerary = await Itinerary.findById(req.params.id)
+    const id = req.params.id;
+    
+    // Check if id is a valid ObjectId
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ success: false, message: 'Invalid moment ID format' });
+    }
+    
+    const itinerary = await Itinerary.findById(id)
       .populate('steps.venueId')
       .populate('userId', 'firstName lastName avatar');
 

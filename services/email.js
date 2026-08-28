@@ -1,35 +1,99 @@
-const nodemailer = require('nodemailer');
+const https = require('https');
 
 class EmailService {
   constructor() {
-    this.transporter = null;
     this.initialized = false;
+    this.apiKey = null;
+    this.senderEmail = null;
+    this.senderName = null;
   }
 
   init() {
     if (this.initialized) return;
 
-    const smtpHost = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
-    const smtpPort = parseInt(process.env.SMTP_PORT || '587');
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
+    this.apiKey = process.env.BREVO_API_KEY;
+    this.senderEmail = process.env.BREVO_SENDER_EMAIL || 'djossouvirouane6@gmail.com';
+    this.senderName = process.env.BREVO_SENDER_NAME || 'MOMENT';
 
-    if (smtpUser && smtpPass) {
-      this.transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
-      this.initialized = true;
-      console.log(`📧 Email service initialized — Brevo SMTP (${smtpHost}:${smtpPort})`);
-    } else {
-      console.log('⚠️  No SMTP config (SMTP_USER / SMTP_PASS) — emails logged to console only');
-      this.initialized = true;
+    console.log('📧 Email Service Init Check (Brevo API):');
+    console.log('   BREVO_API_KEY:', this.apiKey ? '✓ Set' : '✗ Not set');
+    console.log('   BREVO_SENDER_EMAIL:', this.senderEmail);
+
+    this.initialized = true;
+  }
+
+  async sendMail(to, subject, html) {
+    this.init();
+
+    if (!this.apiKey) {
+      console.log(`\n📧 [MOCK EMAIL] To: ${to}`);
+      console.log(`   Subject: ${subject}`);
+      console.log(`   ---`);
+      console.log(html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().substring(0, 200));
+      console.log('---\n');
+      return { success: true, mock: true };
     }
+
+    try {
+      console.log(`📧 Sending email via Brevo API to: ${to}`);
+      
+      const payload = JSON.stringify({
+        sender: {
+          name: this.senderName,
+          email: this.senderEmail,
+        },
+        to: [
+          {
+            email: to,
+            name: '',
+          },
+        ],
+        subject: subject,
+        htmlContent: html,
+      });
+
+      const result = await this._brevoRequest('/v3/smtp/email', payload);
+      
+      console.log(`✅ Email sent successfully to ${to}`);
+      console.log(`   Response:`, result);
+      return { success: true, messageId: result };
+    } catch (error) {
+      console.error(`❌ Email failed to ${to}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  _brevoRequest(path, body) {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.brevo.com',
+        port: 443,
+        path: path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': this.apiKey,
+          'Accept': 'application/json',
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(data ? JSON.parse(data) : {});
+          } else {
+            console.error(`   Brevo API Error ${res.statusCode}:`, data);
+            reject(new Error(`Brevo API error ${res.statusCode}: ${data}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => reject(error));
+      req.write(body);
+      req.end();
+    });
   }
 
   _getBaseTemplate(title, content) {
@@ -57,31 +121,6 @@ class EmailService {
       </div>
     </body>
     </html>`;
-  }
-
-  async sendMail(to, subject, html) {
-    this.init();
-
-    if (!this.transporter) {
-      console.log(`\n📧 [MOCK EMAIL] To: ${to}\n   Subject: ${subject}\n   ---`);
-      console.log(html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().substring(0, 200));
-      console.log('---\n');
-      return { success: true, mock: true };
-    }
-
-    try {
-      const info = await this.transporter.sendMail({
-        from: process.env.SMTP_FROM || '"MOMENT" <no-reply@moment.bj>',
-        to,
-        subject,
-        html,
-      });
-      console.log(`📧 Email sent to ${to}: ${info.messageId}`);
-      return { success: true, messageId: info.messageId };
-    } catch (error) {
-      console.error(`❌ Email failed to ${to}:`, error.message);
-      return { success: false, error: error.message };
-    }
   }
 
   async sendOtpEmail(to, firstName, otpCode, purpose = 'verification') {

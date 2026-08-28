@@ -74,9 +74,13 @@ router.post('/register', async (req, res, next) => {
     });
 
     // Send OTP by email
-    emailService.sendOtpEmail(email, firstName, otpCode, 'verification').catch(err => {
-      console.error('Failed to send OTP email:', err);
-    });
+    console.log(`📧 Attempting to send OTP email to: ${email}`);
+    const emailResult = await emailService.sendOtpEmail(email, firstName, otpCode, 'verification');
+    console.log(`📧 Email result:`, emailResult);
+    
+    if (!emailResult.success) {
+      console.error(`❌ Failed to send OTP email to ${email}:`, emailResult.error);
+    }
 
     res.status(201).json({
       success: true,
@@ -117,13 +121,15 @@ router.post('/verify-otp', async (req, res, next) => {
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
       maxAge: 30 * 24 * 60 * 60 * 1000
     });
 
     res.json({
       success: true,
       message: 'Vérification réussie',
+      token,
       user: {
         id: user._id,
         firstName: user.firstName,
@@ -292,13 +298,15 @@ router.post('/login', async (req, res, next) => {
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
       maxAge: 30 * 24 * 60 * 60 * 1000
     });
 
     res.json({
       success: true,
       message: 'Connexion réussie',
+      token,
       user: {
         id: user._id,
         firstName: user.firstName,
@@ -436,7 +444,8 @@ router.get('/google/callback', passport.authenticate('google', { session: false 
   res.cookie('token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/',
     maxAge: 30 * 24 * 60 * 60 * 1000
   });
 
