@@ -22,7 +22,7 @@ class EmailService {
     this.initialized = true;
   }
 
-  async sendMail(to, subject, html) {
+  async sendMail(to, subject, html, recipientName) {
     this.init();
 
     if (!this.apiKey) {
@@ -37,6 +37,9 @@ class EmailService {
     try {
       console.log(`📧 Sending email via Brevo API to: ${to}`);
       
+      // Brevo requires a non-empty name — fallback to email prefix
+      const name = recipientName || to.split('@')[0] || 'Utilisateur';
+      
       const payload = JSON.stringify({
         sender: {
           name: this.senderName,
@@ -45,7 +48,7 @@ class EmailService {
         to: [
           {
             email: to,
-            name: '',
+            name: name,
           },
         ],
         subject: subject,
@@ -143,7 +146,7 @@ class EmailService {
       </p>
     `);
 
-    return this.sendMail(to, `MOMENT — ${title}`, html);
+    return this.sendMail(to, `MOMENT — ${title}`, html, firstName);
   }
 
   async sendBookingConfirmation(to, firstName, bookingData) {
@@ -163,7 +166,7 @@ class EmailService {
       </p>
     `);
 
-    return this.sendMail(to, 'MOMENT — Réservation confirmée', html);
+    return this.sendMail(to, 'MOMENT — Réservation confirmée', html, firstName);
   }
 }
 
