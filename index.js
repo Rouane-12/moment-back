@@ -87,6 +87,8 @@ io.on('connection', (socket) => {
       // Join user-specific room
       socket.join(`user:${decoded.id}`);
       console.log(`👤 Socket auth: ${decoded.id}`);
+      // Send userId back to client
+      socket.emit('socket-authenticated', { userId: decoded.id });
     } catch (e) {
       console.log('Socket auth failed');
     }
