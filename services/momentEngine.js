@@ -150,7 +150,9 @@ async function composeMoment(params) {
     adapted = true;
   }
 
-  const ordered = [...picked];
+  // Filter out venues with invalid coordinates
+  const withCoords = picked.filter(v => v.latitude && v.longitude && !(v.latitude === 0 && v.longitude === 0));
+  const ordered = [...(withCoords.length >= 2 ? withCoords : picked)];
   ordered.sort((a, b) => a.longitude - b.longitude);
   
   let current = ordered.shift();
@@ -167,14 +169,17 @@ async function composeMoment(params) {
   let distanceKm = 0;
   const steps = finalOrder.map((venue, i) => {
     const travel = i === 0 ? 0 : calculateDistance(finalOrder[i - 1].latitude, finalOrder[i - 1].longitude, venue.latitude, venue.longitude);
-    distanceKm += travel;
-    if (i > 0) clock = addMinutes(clock, Math.round(travel * 4) + 10);
+    // Cap absurd distances (e.g. from missing coords) to a reasonable value
+    const cappedTravel = Math.min(travel, 50);
+    distanceKm += cappedTravel;
+    if (i > 0) clock = addMinutes(clock, Math.round(cappedTravel * 4) + 10);
     const start = clock;
     const end = addMinutes(start, 90);
     clock = end;
     
     const price = venue.priceRange?.average || venue.priceRange?.min || 5000;
     
+    const pricePerPerson = price;
     return {
       venue: {
         id: venue._id,
@@ -186,12 +191,16 @@ async function composeMoment(params) {
         latitude: venue.latitude,
         longitude: venue.longitude,
         address: venue.address,
-        image: venue.media?.[0]?.url || ''
+        image: venue.media?.[0]?.url || '',
+        pricePerPerson: pricePerPerson,
+        reviews: venue.reviewCount,
+        durationMin: 90,
+        tagline: venue.description || ''
       },
       start,
       end,
       price: price * people,
-      distanceKm: travel
+      distanceKm: Math.round(cappedTravel * 100) / 100
     };
   });
 
@@ -203,11 +212,11 @@ async function composeMoment(params) {
   const score = Math.round((budgetScore * 0.25 + distScore * 0.2 + ratingScore * 0.25 + prefScore * 0.2 + 0.1) * 100);
 
   const TITLES = {
-    chill: ['Sunset Mode', 'Slow Cotonou', 'Palm & Breeze'],
+    chill: ['Coucher de Soleil', 'Cotonou Zen', 'Palmeraie & Brise'],
     food: ['Table Ouverte', 'Braise & Co', 'Goût de la Nuit'],
-    fun: ['Manettes & Grillades', 'Arcade Run', 'Score Party'],
-    entertainment: ['Écran Total', 'Night Arcade', 'Grand Jeu'],
-    night: ['Afrobeat Nocturne', 'Live & Late', 'Cotonou After'],
+    fun: ['Manettes & Grillades', 'Session Arcade', 'Soirée Jeux'],
+    entertainment: ['Écran Total', 'Soirée Ciné', 'Grand Jeu'],
+    night: ['Afrobeat Nocturne', 'Live & Tard', 'Cotonou After'],
     surprise: ['Carte Blanche', 'Le Détour', 'Hasard Choisi']
   };
 
