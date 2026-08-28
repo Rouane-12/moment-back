@@ -67,6 +67,22 @@ router.post('/', auth, async (req, res, next) => {
   }
 });
 
+// Get current user's bookings
+router.get('/mine', auth, async (req, res, next) => {
+  try {
+    const bookings = await Booking.find({ userId: req.user._id })
+      .populate({
+        path: 'itineraryId',
+        populate: { path: 'steps.venueId', select: 'name category media district' }
+      })
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, bookings });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id', auth, async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id)
