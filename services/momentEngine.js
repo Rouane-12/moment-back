@@ -73,7 +73,14 @@ async function composeMoment(params) {
     }
   }
 
+  // Merge user vibe categories into the wanted list
+  // This ensures venues matching user preferences are always included
   const wanted = [...theme.categories];
+  for (const vc of vibeCats) {
+    if (!wanted.includes(vc)) {
+      wanted.push(vc);
+    }
+  }
   let adapted = false;
 
   const picked = [];
