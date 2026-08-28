@@ -104,10 +104,13 @@ io.on('connection', (socket) => {
 
   // === Voice Call Signaling ===
   socket.on('call-init', (data) => {
+    console.log('📞 call-init received from:', socket.userId, 'to:', data.to);
+    console.log('📞 Emitting to room:', `user:${data.to}`);
     io.to(`user:${data.to}`).emit('call-init', { ...data, from: data.from });
   });
 
   socket.on('call-answer', (data) => {
+    console.log('📞 call-answer received');
     io.to(`user:${data.to}`).emit('call-answer', data);
   });
 
@@ -116,6 +119,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('call-end', (data) => {
+    console.log('📞 call-end received');
     io.to(`user:${data.to}`).emit('call-ended', data);
   });
 

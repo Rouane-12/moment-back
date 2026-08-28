@@ -31,14 +31,15 @@ const messageSchema = new mongoose.Schema({
   attachments: [{
     type: {
       type: String,
-      enum: ['image', 'voice', 'document'],
+      enum: ['image', 'voice', 'document', 'call'],
       required: true
     },
-    url: { type: String, required: true },
+    url: { type: String, default: '' },
     name: { type: String, default: '' },
     size: { type: Number, default: 0 },
     duration: { type: Number, default: 0 },
-    mimeType: { type: String, default: '' }
+    mimeType: { type: String, default: '' },
+    status: { type: String, default: '' }
   }]
 }, {
   timestamps: true
