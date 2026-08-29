@@ -28,6 +28,13 @@ const messageSchema = new mongoose.Schema({
   readAt: {
     type: Date
   },
+  edited: {
+    type: Boolean,
+    default: false
+  },
+  editedAt: {
+    type: Date
+  },
   attachments: [{
     type: {
       type: String,

@@ -148,6 +148,74 @@ router.post('/send', auth, async (req, res, next) => {
   }
 });
 
+// Edit a message
+router.put('/messages/:messageId', auth, async (req, res, next) => {
+  try {
+    const { messageId } = req.params;
+    const { content } = req.body;
+
+    if (!content || content.trim() === '') {
+      return res.status(400).json({ success: false, message: 'Contenu requis' });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, message: 'Message non trouvé' });
+    }
+
+    if (message.sender.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Vous ne pouvez modifier que vos propres messages' });
+    }
+
+    message.content = content.trim();
+    message.edited = true;
+    message.editedAt = new Date();
+    await message.save();
+
+    const populated = await Message.findById(message._id)
+      .populate('sender', 'firstName lastName avatar role')
+      .populate('receiver', 'firstName lastName avatar role');
+
+    // Notify via socket
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${message.conversationId}`).emit('message-edited', populated);
+    }
+
+    res.json({ success: true, message: populated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete a message
+router.delete('/messages/:messageId', auth, async (req, res, next) => {
+  try {
+    const { messageId } = req.params;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, message: 'Message non trouvé' });
+    }
+
+    if (message.sender.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Vous ne pouvez supprimer que vos propres messages' });
+    }
+
+    await Message.findByIdAndDelete(messageId);
+
+    // Notify via socket
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conv:${message.conversationId}`).emit('message-deleted', { messageId, conversationId: message.conversationId });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Mark messages as read
 router.post('/read/:conversationId', auth, async (req, res, next) => {
   try {
