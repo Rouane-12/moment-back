@@ -362,7 +362,10 @@ router.put('/me', auth, async (req, res, next) => {
       { new: true, runValidators: true }
     ).select('-password');
 
-    res.json({ success: true, user });
+    const userData = user.toObject();
+    userData.id = userData._id.toString();
+
+    res.json({ success: true, user: userData });
   } catch (error) {
     next(error);
   }
