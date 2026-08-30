@@ -74,6 +74,9 @@ app.use('/api/guest', require('./routes/guestUsage.js'));
 // Error handling middleware
 app.use(errorHandler);
 
+// Track online users
+const onlineUsers = new Map(); // userId -> Set<socketId>
+
 // Socket.IO — real-time chat
 io.on('connection', (socket) => {
   console.log('🔌 Socket connected:', socket.id);
@@ -89,6 +92,12 @@ io.on('connection', (socket) => {
       console.log(`👤 Socket auth: ${decoded.id}`);
       // Send userId back to client
       socket.emit('socket-authenticated', { userId: decoded.id });
+
+      // Track online status
+      if (!onlineUsers.has(decoded.id)) onlineUsers.set(decoded.id, new Set());
+      onlineUsers.get(decoded.id).add(socket.id);
+      // Broadcast online status to all connected users
+      io.emit('presence-update', { userId: decoded.id, online: true });
     } catch (e) {
       console.log('Socket auth failed');
     }
@@ -127,7 +136,21 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('🔌 Socket disconnected:', socket.id);
+    // Remove from online users
+    if (socket.userId && onlineUsers.has(socket.userId)) {
+      onlineUsers.get(socket.userId).delete(socket.id);
+      if (onlineUsers.get(socket.userId).size === 0) {
+        onlineUsers.delete(socket.userId);
+        io.emit('presence-update', { userId: socket.userId, online: false });
+      }
+    }
   });
+});
+
+// Check if users are online
+app.get('/api/presence/:userId', (req, res) => {
+  const isOnline = onlineUsers.has(req.params.userId);
+  res.json({ online: isOnline });
 });
 
 // For local development

@@ -30,7 +30,12 @@ const userSchema = new mongoose.Schema({
     select: false
   },
   avatar: {
-    type: String
+    type: String,
+    default: ''
+  },
+  coverImage: {
+    type: String,
+    default: ''
   },
   city: {
     type: String,

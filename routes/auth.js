@@ -345,11 +345,20 @@ router.get('/me', auth, async (req, res, next) => {
 
 router.put('/me', auth, async (req, res, next) => {
   try {
-    const { firstName, lastName, city, dateOfBirth, preferences } = req.body;
+    const { firstName, lastName, city, dateOfBirth, preferences, avatar, coverImage } = req.body;
+
+    const updateData = {};
+    if (firstName !== undefined) updateData.firstName = firstName;
+    if (lastName !== undefined) updateData.lastName = lastName;
+    if (city !== undefined) updateData.city = city;
+    if (dateOfBirth !== undefined) updateData.dateOfBirth = dateOfBirth;
+    if (preferences !== undefined) updateData.preferences = preferences;
+    if (avatar !== undefined) updateData.avatar = avatar; // base64 or URL
+    if (coverImage !== undefined) updateData.coverImage = coverImage; // base64 or URL
 
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { firstName, lastName, city, dateOfBirth, preferences },
+      updateData,
       { new: true, runValidators: true }
     ).select('-password');
 
