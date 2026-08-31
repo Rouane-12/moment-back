@@ -121,11 +121,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('call-answer', (data) => {
-    console.log('📞 call-answer received');
+    console.log('📞 call-answer received from:', socket.userId, 'to:', data.to);
     io.to(`user:${data.to}`).emit('call-answer', data);
   });
 
   socket.on('call-ice-candidate', (data) => {
+    console.log('📞 call-ice-candidate from:', socket.userId, 'to:', data.to);
     io.to(`user:${data.to}`).emit('call-ice-candidate', data);
   });
 
