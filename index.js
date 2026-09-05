@@ -117,22 +117,30 @@ io.on('connection', (socket) => {
   socket.on('call-init', (data) => {
     console.log('📞 call-init received from:', socket.userId, 'to:', data.to);
     console.log('📞 Emitting to room:', `user:${data.to}`);
-    io.to(`user:${data.to}`).emit('call-init', { ...data, from: data.from });
+    const room = `user:${data.to}`;
+    const clients = io.sockets.adapter.rooms.get(room);
+    console.log('📞 Room clients count:', clients ? clients.size : 0);
+    io.to(room).emit('call-init', { ...data, from: data.from });
   });
 
   socket.on('call-answer', (data) => {
     console.log('📞 call-answer received from:', socket.userId, 'to:', data.to);
-    io.to(`user:${data.to}`).emit('call-answer', data);
+    const room = `user:${data.to}`;
+    const clients = io.sockets.adapter.rooms.get(room);
+    console.log('📞 call-answer Room clients count:', clients ? clients.size : 0);
+    io.to(room).emit('call-answer', data);
   });
 
   socket.on('call-ice-candidate', (data) => {
     console.log('📞 call-ice-candidate from:', socket.userId, 'to:', data.to);
-    io.to(`user:${data.to}`).emit('call-ice-candidate', data);
+    const room = `user:${data.to}`;
+    io.to(room).emit('call-ice-candidate', data);
   });
 
   socket.on('call-end', (data) => {
-    console.log('📞 call-end received');
-    io.to(`user:${data.to}`).emit('call-ended', data);
+    console.log('📞 call-end received from:', socket.userId, 'to:', data.to);
+    const room = `user:${data.to}`;
+    io.to(room).emit('call-ended', data);
   });
 
   socket.on('disconnect', () => {
