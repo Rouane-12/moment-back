@@ -154,7 +154,7 @@ function createRPSGame(p1, p2) {
     id: createGameId(), type: 'rps',
     players: [p1, p2], scores: { [p1]: 0, [p2]: 0 },
     currentRound: 0, maxRounds: 5, state: 'waiting',
-    choices: {}, phase: 'choosing',
+    moves: {}, choices: {}, phase: 'choosing',
     roundWinner: null,
   };
 }
@@ -163,6 +163,7 @@ const RPS_BEATS = { rock: 'scissors', scissors: 'paper', paper: 'rock' };
 
 function rpsMove(game, userId, choice, io) {
   if (game.phase !== 'choosing' || !['rock', 'paper', 'scissors'].includes(choice)) return;
+  if (!game.moves) game.moves = {};
   game.moves[userId] = choice;
 
   if (Object.keys(game.moves).length === 2) {
@@ -312,25 +313,30 @@ function setupGameEvents(socket, io, getUserId) {
   });
 
   socket.on('game-move', (data) => {
-    const userId = getUserId(socket);
-    if (!userId) return;
-    const game = activeGames.get(data.gameId);
-    if (!game) return;
+    try {
+      const userId = getUserId(socket);
+      if (!userId) return;
+      const game = activeGames.get(data.gameId);
+      if (!game) return;
 
-    switch (game.type) {
-      case 'reflex':
-        if (data.move === 'react') reflexReact(game, userId, io);
-        if (data.move === 'false-start') reflexFalseStart(game, userId, io);
-        break;
-      case 'tictactoe':
-        if (data.cellIndex !== undefined) tttMove(game, userId, data.cellIndex, io);
-        break;
-      case 'rps':
-        if (data.choice) rpsMove(game, userId, data.choice, io);
-        break;
-      case 'dice':
-        if (data.move === 'roll') diceRoll(game, userId, io);
-        break;
+      switch (game.type) {
+        case 'reflex':
+          if (data.move === 'react') reflexReact(game, userId, io);
+          if (data.move === 'false-start') reflexFalseStart(game, userId, io);
+          break;
+        case 'tictactoe':
+          if (data.cellIndex !== undefined) tttMove(game, userId, data.cellIndex, io);
+          break;
+        case 'rps':
+          if (data.choice) rpsMove(game, userId, data.choice, io);
+          break;
+        case 'dice':
+          if (data.move === 'roll') diceRoll(game, userId, io);
+          break;
+      }
+    } catch (err) {
+      // Never let one bad move crash the whole server
+      console.error('🎮 Erreur game-move:', err);
     }
   });
 
@@ -348,8 +354,14 @@ function setupGameEvents(socket, io, getUserId) {
   socket.on('game-next-round', (data) => {
     const game = activeGames.get(data.gameId);
     if (!game) return;
-    if (game.type === 'rps') rpsNextRound(game, io);
-    else if (game.type === 'dice') diceNextRound(game, io);
+    // Only advance once per round — ignore taps from both players racing
+    if (game.type === 'rps') {
+      if (game.phase !== 'revealed') return;
+      rpsNextRound(game, io);
+    } else if (game.type === 'dice') {
+      if (game.phase !== 'done') return;
+      diceNextRound(game, io);
+    }
   });
 
   socket.on('disconnect', () => {
