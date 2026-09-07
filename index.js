@@ -79,7 +79,7 @@ const onlineUsers = new Map(); // userId -> Set<socketId>
 
 // Socket.IO — real-time chat
 io.on('connection', (socket) => {
-  console.log('🔌 Socket connected:', socket.id);
+  console.log('🔌 Socket connected:', socket.id, 'transport:', socket.conn.transport.name);
 
   // Authenticate socket with JWT
   const token = socket.handshake.auth?.token;
@@ -89,7 +89,7 @@ io.on('connection', (socket) => {
       socket.userId = decoded.id;
       // Join user-specific room
       socket.join(`user:${decoded.id}`);
-      console.log(`👤 Socket auth: ${decoded.id}`);
+      console.log(`👤 Socket auth: ${decoded.id} joined room: user:${decoded.id}`);
       // Send userId back to client
       socket.emit('socket-authenticated', { userId: decoded.id });
 
@@ -99,7 +99,7 @@ io.on('connection', (socket) => {
       // Broadcast online status to all connected users
       io.emit('presence-update', { userId: decoded.id, online: true });
     } catch (e) {
-      console.log('Socket auth failed');
+      console.log('Socket auth failed:', e.message);
     }
   }
 
@@ -111,6 +111,14 @@ io.on('connection', (socket) => {
   // Leave a conversation room
   socket.on('leave', (conversationId) => {
     socket.leave(`conv:${conversationId}`);
+  });
+
+  // Debug: check room membership
+  socket.on('check-room', (userId) => {
+    const room = `user:${userId}`;
+    const clients = io.sockets.adapter.rooms.get(room);
+    console.log(`🔍 Room check for ${room}:`, clients ? clients.size : 0, 'clients');
+    socket.emit('room-check-result', { room, count: clients ? clients.size : 0 });
   });
 
   // === Voice Call Signaling ===
@@ -140,7 +148,7 @@ io.on('connection', (socket) => {
   socket.on('call-end', (data) => {
     console.log('📞 call-end received from:', socket.userId, 'to:', data.to);
     const room = `user:${data.to}`;
-    io.to(room).emit('call-ended', data);
+    io.to(room).emit('call-ended', { ...data, from: data.from || socket.userId });
   });
 
   socket.on('disconnect', () => {
