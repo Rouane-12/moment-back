@@ -35,13 +35,19 @@ router.get('/conversations', auth, async (req, res, next) => {
       { $sort: { 'lastMessage.createdAt': -1 } }
     ]);
 
+    // Get hidden conversations for this user
+    const currentUser = await User.findById(userId).select('hiddenConversations blockedUsers');
+    const hiddenIds = (currentUser.hiddenConversations || []).map(id => id.toString());
+
     // Populate user info for each conversation
     const populated = await Promise.all(
       conversations.map(async (conv) => {
         const otherUserId = conv.lastMessage.sender.toString() === userId.toString()
           ? conv.lastMessage.receiver
           : conv.lastMessage.sender;
-        const otherUser = await User.findById(otherUserId).select('firstName lastName role avatar');
+        // Skip hidden conversations
+        if (hiddenIds.includes(otherUserId.toString())) return null;
+        const otherUser = await User.findById(otherUserId).select('firstName lastName role avatar avatar');
 
         return {
           conversationId: conv._id,
@@ -57,7 +63,8 @@ router.get('/conversations', auth, async (req, res, next) => {
       })
     );
 
-    res.json({ success: true, conversations: populated });
+    // Filter out nulls (hidden conversations)
+    res.json({ success: true, conversations: populated.filter(Boolean) });
   } catch (error) {
     next(error);
   }
@@ -321,6 +328,70 @@ router.get('/admin-info', auth, requireRole('partner_owner', 'partner_manager', 
       return res.status(404).json({ success: false, message: 'Aucun admin trouvé' });
     }
     res.json({ success: true, admin });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete all messages in a conversation (clear chat)
+router.delete('/conversation/:conversationId', auth, async (req, res, next) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user._id.toString();
+    const [user1, user2] = conversationId.split('_');
+    if (userId !== user1 && userId !== user2) {
+      return res.status(403).json({ success: false, message: 'Accès refusé' });
+    }
+
+    const result = await Message.deleteMany({ conversationId });
+
+    const io = req.app.get('io');
+    if (io) {
+      const otherUserId = user1 === userId ? user2 : user1;
+      io.to(`conv:${conversationId}`).emit('conversation-cleared', { conversationId });
+      io.to(`user:${otherUserId}`).emit('conversation-cleared', { conversationId });
+    }
+
+    res.json({ success: true, deleted: result.deletedCount });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Block a user
+router.post('/block/:userId', auth, async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    if (!req.user.blockedUsers) req.user.blockedUsers = [];
+    const isBlocked = req.user.blockedUsers.includes(userId);
+    if (isBlocked) {
+      req.user.blockedUsers = req.user.blockedUsers.filter((id) => id.toString() !== userId);
+    } else {
+      req.user.blockedUsers.push(userId);
+    }
+    await req.user.save();
+    res.json({ success: true, blocked: !isBlocked });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete conversation from list (hide for this user)
+router.delete('/conversation/:conversationId/hide', auth, async (req, res, next) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user._id.toString();
+    const [user1, user2] = conversationId.split('_');
+    if (userId !== user1 && userId !== user2) {
+      return res.status(403).json({ success: false, message: 'Accès refusé' });
+    }
+    const otherUserId = user1 === userId ? user2 : user1;
+    if (!req.user.hiddenConversations) req.user.hiddenConversations = [];
+    if (!req.user.hiddenConversations.includes(otherUserId)) {
+      req.user.hiddenConversations.push(otherUserId);
+      await req.user.save();
+    }
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }

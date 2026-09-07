@@ -109,7 +109,15 @@ const userSchema = new mongoose.Schema({
   },
   resetCodeExpires: {
     type: Date
-  }
+  },
+  blockedUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  hiddenConversations: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }]
 }, {
   timestamps: true
 });

@@ -8,6 +8,7 @@ const errorHandler = require('./middleware/errorHandler');
 
 const http = require('http');
 const { Server } = require('socket.io');
+const { setupGameEvents } = require('./games/gameEngine');
 const jwt = require('jsonwebtoken');
 
 const app = express();
@@ -120,6 +121,9 @@ io.on('connection', (socket) => {
     console.log(`🔍 Room check for ${room}:`, clients ? clients.size : 0, 'clients');
     socket.emit('room-check-result', { room, count: clients ? clients.size : 0 });
   });
+
+  // === Mini-Games ===
+  setupGameEvents(socket, io, (s) => s.userId);
 
   // === Voice Call Signaling ===
   socket.on('call-init', (data) => {
