@@ -3,6 +3,8 @@
  * Real-time via Socket.IO — games appear as cards inside conversations
  */
 
+const { createQuizGame, quizAccept, quizAnswer, quizNext, quizRematch, buildQuizView, clearQuizTimers } = require('./quiz');
+
 const activeGames = new Map();
 
 function createGameId() {
@@ -11,6 +13,13 @@ function createGameId() {
 
 function emitGameState(io, game) {
   if (!game) return;
+  if (game.type === 'quiz') {
+    // Le quiz envoie une vue par joueur (les bonnes réponses ne fuient jamais)
+    for (const p of game.players) {
+      io.to(`user:${p}`).emit('game-state', { game: buildQuizView(game, p) });
+    }
+    return;
+  }
   io.to(`user:${game.players[0]}`).emit('game-state', { game });
   io.to(`user:${game.players[1]}`).emit('game-state', { game });
 }
@@ -269,13 +278,20 @@ function setupGameEvents(socket, io, getUserId) {
       case 'tictactoe': game = createTicTacToeGame(userId, to); break;
       case 'rps': game = createRPSGame(userId, to); break;
       case 'dice': game = createDiceGame(userId, to); break;
+      case 'quiz': game = createQuizGame(userId, to, io); break;
       default: return;
     }
     game.createdBy = userId;
     activeGames.set(game.id, game);
     console.log(`🎮 Game invite: ${gameType} from ${userId} to ${to}`);
-    io.to(`user:${to}`).emit('game-invite', { game, from: userId });
-    io.to(`user:${userId}`).emit('game-invite', { game, from: userId });
+    if (game.type === 'quiz') {
+      // Vue par joueur : le pack contient les bonnes réponses côté serveur
+      io.to(`user:${to}`).emit('game-invite', { game: buildQuizView(game, to), from: userId });
+      io.to(`user:${userId}`).emit('game-invite', { game: buildQuizView(game, userId), from: userId });
+    } else {
+      io.to(`user:${to}`).emit('game-invite', { game, from: userId });
+      io.to(`user:${userId}`).emit('game-invite', { game, from: userId });
+    }
   });
 
   socket.on('game-accept', (data) => {
@@ -285,14 +301,23 @@ function setupGameEvents(socket, io, getUserId) {
     if (!game || game.state !== 'waiting') return;
     game.state = 'playing';
     console.log(`🎮 Game accepted: ${game.type}`);
-    io.to(`user:${game.players[0]}`).emit('game-start', { game });
-    io.to(`user:${game.players[1]}`).emit('game-start', { game });
+    if (game.type === 'quiz') {
+      for (const p of game.players) {
+        io.to(`user:${p}`).emit('game-start', { game: buildQuizView(game, p) });
+      }
+    } else {
+      io.to(`user:${game.players[0]}`).emit('game-start', { game });
+      io.to(`user:${game.players[1]}`).emit('game-start', { game });
+    }
 
     if (game.type === 'reflex') {
       startReflexRound(game, io);
     } else if (game.type === 'rps' || game.type === 'dice') {
       game.currentRound++;
       emitGameState(io, game);
+    } else if (game.type === 'quiz') {
+      // Démarre les questions si le pack IA est prêt, sinon attend sa génération
+      quizAccept(game, io);
     } else {
       emitGameState(io, game);
     }
@@ -301,6 +326,7 @@ function setupGameEvents(socket, io, getUserId) {
   socket.on('game-decline', (data) => {
     const game = activeGames.get(data.gameId);
     if (!game) return;
+    clearQuizTimers(game);
     game.state = 'finished';
     game.winner = 'declined';
     emitGameState(io, game);
@@ -309,7 +335,10 @@ function setupGameEvents(socket, io, getUserId) {
 
   socket.on('game-close', (data) => {
     const game = activeGames.get(data.gameId);
-    if (game) activeGames.delete(data.gameId);
+    if (game) {
+      clearQuizTimers(game);
+      activeGames.delete(data.gameId);
+    }
   });
 
   socket.on('game-move', (data) => {
@@ -333,6 +362,10 @@ function setupGameEvents(socket, io, getUserId) {
         case 'dice':
           if (data.move === 'roll') diceRoll(game, userId, io);
           break;
+        case 'quiz':
+          if (data.move === 'answer' && data.answerIndex !== undefined) quizAnswer(game, userId, data.answerIndex, io);
+          if (data.move === 'next') quizNext(game, userId, io);
+          break;
       }
     } catch (err) {
       // Never let one bad move crash the whole server
@@ -348,6 +381,7 @@ function setupGameEvents(socket, io, getUserId) {
       case 'tictactoe': tttRematch(game, io); break;
       case 'rps': rpsRematch(game, io); break;
       case 'dice': diceRematch(game, io); break;
+      case 'quiz': quizRematch(game, io); break;
     }
   });
 
@@ -369,6 +403,7 @@ function setupGameEvents(socket, io, getUserId) {
     if (!userId) return;
     for (const [id, game] of activeGames) {
       if (game.players.includes(userId) && game.state === 'playing') {
+        clearQuizTimers(game);
         game.state = 'finished';
         game.winner = 'disconnect';
         const other = game.players.find(p => p !== userId);
