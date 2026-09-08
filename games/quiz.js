@@ -12,12 +12,18 @@
  */
 
 const axios = require('axios');
+const QuizQuestion = require('../models/QuizQuestion');
+const { normalizeText, createHash, isExactDuplicate, isSemanticSimilar, normalizeQuestion } = require('../utils/quizDuplicateChecker');
+const { fetchOpenTDBQuestions, requestSessionToken } = require('../utils/openTDB');
 
 const PACK_SIZE = 20;
 const QUESTION_TIME_MS = 20000; // 20s par question
 const FEEDBACK_TIME_MS = 6000;  // 6s d'affichage du résultat avant la suivante
-const TIERS = ['facile', 'moyen', 'difficile', 'tres_difficile'];
-const TIER_POINTS = { facile: 100, moyen: 200, difficile: 300, tres_difficile: 500 };
+const TIERS = ['facile', 'moyen', 'difficile', 'tres_difficile', 'expert'];
+const TIER_POINTS = { facile: 100, moyen: 200, difficile: 300, tres_difficile: 500, expert: 600 };
+
+// OpenTDB session token (initialized on first use)
+let opentdbToken = null;
 
 function createGameId() {
   return Math.random().toString(36).substring(2, 10);
@@ -36,18 +42,52 @@ function shuffleIndices(n) {
 // GÉNÉRATION DU PACK (OpenAI + fallback)
 // ══════════════════════════════════════
 
-const AI_PROMPT = `Tu es un générateur de quiz de culture générale en français pour un jeu multijoueur inspiré de « Qui veut gagner des millions ? ».
+async function getUsedQuestionsText() {
+  try {
+    const recentQuestions = await QuizQuestion.find({})
+      .sort({ lastUsedAt: -1 })
+      .limit(100)
+      .select('text');
+    return recentQuestions.map(q => q.text).join('\n- ');
+  } catch (error) {
+    console.error('Error fetching used questions:', error.message);
+    return '';
+  }
+}
 
-Génère exactement 20 questions NOUVELLES et UNIQUEMENT différentes à chaque appel.
-Règles :
-- Les 5 premières questions sont faciles, les 5 suivantes moyennes, les 5 suivantes difficiles, les 5 dernières très difficiles.
-- Chaque question a exactement 4 réponses possibles et une seule réponse correcte.
-- Utilise uniquement des faits objectifs et vérifiables, sans ambiguïté, sans opinion, sans date relative.
-- Varie les domaines : géographie, histoire, sciences, sport, arts, culture, technologie, nature, politique, économie, littérature, musique, cinéma...
-- IMPORTANT : Chaque appel doit générer des questions DIFFÉRENTES des appels précédents. Utilise des sujets variés et inédits.
-- Évite les questions trop courantes comme "Quelle est la capitale de la France ?" ou "Combien de continents ?".
-- Réponds UNIQUEMENT avec un objet JSON au format : {"questions":[{"question":"...","answers":["...","...","...","..."],"correctIndex":0}]}
-- "correctIndex" est l'index (0 à 3) de la bonne réponse dans "answers".`;
+async function buildAIPrompt() {
+  const usedQuestions = await getUsedQuestionsText();
+  return `Tu es le générateur officiel du quiz de l'application.
+
+Génère 20 questions originales de culture générale.
+
+Contraintes :
+- Chaque question possède exactement 4 réponses.
+- Une seule réponse est correcte.
+- Les questions doivent être adaptées à des adultes.
+- Ne génère pas de questions enfantines.
+- Les questions doivent couvrir plusieurs domaines :
+  histoire, géographie, sciences, art, littérature, musique,
+  cinéma, technologie, économie, culture africaine, monde,
+  société, sport, architecture, mythologie, etc.
+- Évite les questions extrêmement connues ou évidentes.
+- La difficulté doit progressivement augmenter.
+- Les questions 1 à 5 : moyen
+- 6 à 10 : moyen/difficile
+- 11 à 15 : difficile
+- 16 à 20 : très difficile
+- Ne reformule jamais une question déjà fournie précédemment.
+- Ne produis jamais une question portant sur exactement le même fait qu'une question précédente.
+- Les quatre propositions doivent être plausibles.
+- Ne crée aucune réponse ambiguë.
+- Une réponse doit être factuellement vérifiable.
+- Ne mets pas la réponse correcte systématiquement à la même position.
+
+QUESTIONS DÉJÀ UTILISÉES (ne pas reformuler) :
+${usedQuestions ? '- ' + usedQuestions : '(aucune question enregistrée)'}
+
+Réponds uniquement avec le JSON demandé : {"questions":[{"question":"...","answers":["...","...","...","..."],"correctIndex":0}]}`;
+}
 
 function buildPack(rawList) {
   if (!Array.isArray(rawList) || rawList.length < PACK_SIZE) return null;
@@ -76,6 +116,8 @@ async function generateQuizPack() {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY absente du .env');
 
+  const prompt = await buildAIPrompt();
+
   const res = await axios.post(
     'https://api.openai.com/v1/chat/completions',
     {
@@ -83,7 +125,7 @@ async function generateQuizPack() {
       temperature: 1.0,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: AI_PROMPT },
+        { role: 'system', content: prompt },
       ],
     },
     {
@@ -98,7 +140,10 @@ async function generateQuizPack() {
   const rawList = Array.isArray(parsed) ? parsed : parsed?.questions;
   const pack = buildPack(rawList);
   if (!pack) throw new Error('Pack généré par l\'IA invalide');
-  return pack;
+  
+  // Check for duplicates and save to database
+  const filteredPack = await filterAndSaveQuestions(pack, 'ai');
+  return filteredPack;
 }
 
 // Banque locale de secours — utilisée uniquement si l'API OpenAI échoue,
@@ -174,7 +219,150 @@ const FALLBACK_BANK = {
   ],
 };
 
-function fallbackPack() {
+async function filterAndSaveQuestions(questions, source) {
+  const filtered = [];
+  const existingHashes = new Set();
+  
+  // Fetch existing hashes from database
+  try {
+    const existingQuestions = await QuizQuestion.find({}).select('hash');
+    existingQuestions.forEach(q => existingHashes.add(q.hash));
+  } catch (error) {
+    console.error('Error fetching existing hashes:', error.message);
+  }
+  
+  for (const q of questions) {
+    const normalized = normalizeQuestion(q);
+    
+    // Check for exact duplicate
+    if (existingHashes.has(normalized.hash)) {
+      console.log(`Skipping duplicate question: ${q.question}`);
+      continue;
+    }
+    
+    // Check for semantic similarity with recent questions
+    const recentQuestions = await QuizQuestion.find({})
+      .sort({ lastUsedAt: -1 })
+      .limit(50)
+      .select('text');
+    
+    if (isSemanticSimilar(q.question, recentQuestions.map(rq => rq.text), 0.7)) {
+      console.log(`Skipping semantically similar question: ${q.question}`);
+      continue;
+    }
+    
+    filtered.push(q);
+    existingHashes.add(normalized.hash);
+  }
+  
+  // If we filtered out too many questions, try to fetch from database
+  if (filtered.length < PACK_SIZE) {
+    console.log(`Filtered pack has only ${filtered.length} questions, fetching from database...`);
+    const dbQuestions = await fetchUnusedQuestions(PACK_SIZE - filtered.length);
+    filtered.push(...dbQuestions);
+  }
+  
+  // Save new questions to database
+  for (const q of filtered) {
+    if (!q._saved) {
+      await saveQuestionToDatabase(q, source);
+    }
+  }
+  
+  return filtered.slice(0, PACK_SIZE);
+}
+
+async function saveQuestionToDatabase(question, source, gameId = null) {
+  try {
+    const normalized = normalizeQuestion(question);
+    const tier = question.difficulty || TIERS[Math.floor(Math.random() * TIERS.length)];
+    
+    const quizQuestion = new QuizQuestion({
+      hash: normalized.hash,
+      text: normalized.text,
+      normalizedText: normalized.normalizedText,
+      answers: normalized.answers,
+      correctIndex: normalized.correctIndex,
+      difficulty: tier,
+      points: TIER_POINTS[tier] || 200,
+      category: question.category || 'autre',
+      source: source,
+      usedCount: 1,
+      usedByGames: gameId ? [gameId] : [],
+      lastUsedAt: new Date()
+    });
+    
+    await quizQuestion.save();
+    question._saved = true;
+    console.log(`Saved question to database: ${question.question}`);
+  } catch (error) {
+    if (error.code === 11000) {
+      // Duplicate key error - question already exists
+      console.log(`Question already exists in database: ${question.question}`);
+    } else {
+      console.error('Error saving question to database:', error.message);
+    }
+  }
+}
+
+async function fetchUnusedQuestions(count) {
+  try {
+    // Fetch questions with lowest usage count
+    const questions = await QuizQuestion.find({ isDuplicate: false })
+      .sort({ usedCount: 1, lastUsedAt: 1 })
+      .limit(count)
+      .lean();
+    
+    return questions.map(q => ({
+      id: q._id.toString(),
+      question: q.text,
+      answers: q.answers,
+      correctIndex: q.correctIndex,
+      difficulty: q.difficulty,
+      points: q.points,
+      _saved: true
+    }));
+  } catch (error) {
+    console.error('Error fetching unused questions:', error.message);
+    return [];
+  }
+}
+
+async function fallbackPack() {
+  // Try to fetch from database first
+  try {
+    const dbQuestions = await fetchUnusedQuestions(PACK_SIZE);
+    if (dbQuestions.length >= PACK_SIZE) {
+      console.log('Using questions from database');
+      return dbQuestions.slice(0, PACK_SIZE);
+    }
+  } catch (error) {
+    console.error('Error fetching from database:', error.message);
+  }
+  
+  // Try OpenTDB as second fallback
+  try {
+    if (!opentdbToken) {
+      opentdbToken = await requestSessionToken();
+      if (opentdbToken) console.log('OpenTDB session token acquired');
+    }
+    
+    if (opentdbToken) {
+      const opentdbQuestions = await fetchOpenTDBQuestions(PACK_SIZE, undefined, undefined, opentdbToken);
+      if (opentdbQuestions.length >= PACK_SIZE) {
+        console.log('Using questions from OpenTDB');
+        const filtered = await filterAndSaveQuestions(opentdbQuestions, 'opentdb');
+        if (filtered.length >= PACK_SIZE) {
+          return filtered.slice(0, PACK_SIZE);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching from OpenTDB:', error.message);
+  }
+  
+  // Final fallback to local bank
+  console.log('Using local fallback bank');
   const pack = [];
   let id = 1;
   for (const tier of TIERS) {
@@ -216,9 +404,10 @@ function createQuizGame(p1, p2, io) {
   // (la carte d'invitation s'affiche), puis le pack arrive quand il est prêt.
   generateQuizPack()
     .then(pack => onPackReady(game, io, pack))
-    .catch(err => {
+    .catch(async (err) => {
       console.error('🧠 Génération IA indisponible, pack de secours :', err.message);
-      onPackReady(game, io, fallbackPack());
+      const fallback = await fallbackPack();
+      onPackReady(game, io, fallback);
     });
 
   return game;
@@ -332,7 +521,7 @@ function maybeFinish(game, io) {
   }
 }
 
-function quizRematch(game, io) {
+async function quizRematch(game, io) {
   clearQuizTimers(game);
   game.state = 'playing';
   game.winner = null;
@@ -352,9 +541,10 @@ function quizRematch(game, io) {
   // Generate new questions for rematch to avoid repetition
   generateQuizPack()
     .then(pack => onPackReady(game, io, pack))
-    .catch(err => {
+    .catch(async (err) => {
       console.error('🧠 Génération IA indisponible pour revanche, pack de secours :', err.message);
-      onPackReady(game, io, fallbackPack());
+      const fallback = await fallbackPack();
+      onPackReady(game, io, fallback);
     });
 }
 
