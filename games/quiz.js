@@ -299,6 +299,8 @@ function quizRematch(game, io) {
   clearQuizTimers(game);
   game.state = 'playing';
   game.winner = null;
+  game.quizStatus = 'generating';
+  game.quizError = null;
   for (const p of game.players) {
     game.scores[p] = 0;
     game.correctCount[p] = 0;
@@ -306,10 +308,17 @@ function quizRematch(game, io) {
     game.pstate[p] = 'idle';
     game.deadline[p] = null;
     game.lastResult[p] = null;
-    game.order[p] = shuffleIndices(game.questions.length);
+    game.order[p] = [];
   }
   emitQuizState(io, game);
-  startQuiz(game, io);
+  
+  // Generate new questions for rematch to avoid repetition
+  generateQuizPack()
+    .then(pack => onPackReady(game, io, pack))
+    .catch(err => {
+      console.error('🧠 Génération IA indisponible pour revanche, pack de secours :', err.message);
+      onPackReady(game, io, fallbackPack());
+    });
 }
 
 function schedule(game, userId, io, ms, fn) {
