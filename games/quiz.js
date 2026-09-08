@@ -38,13 +38,14 @@ function shuffleIndices(n) {
 
 const AI_PROMPT = `Tu es un générateur de quiz de culture générale en français pour un jeu multijoueur inspiré de « Qui veut gagner des millions ? ».
 
-Génère exactement 20 questions.
+Génère exactement 20 questions NOUVELLES et UNIQUEMENT différentes à chaque appel.
 Règles :
 - Les 5 premières questions sont faciles, les 5 suivantes moyennes, les 5 suivantes difficiles, les 5 dernières très difficiles.
 - Chaque question a exactement 4 réponses possibles et une seule réponse correcte.
 - Utilise uniquement des faits objectifs et vérifiables, sans ambiguïté, sans opinion, sans date relative.
-- Varie les domaines : géographie, histoire, sciences, sport, arts, culture, technologie, nature...
-- Ne répète jamais une question.
+- Varie les domaines : géographie, histoire, sciences, sport, arts, culture, technologie, nature, politique, économie, littérature, musique, cinéma...
+- IMPORTANT : Chaque appel doit générer des questions DIFFÉRENTES des appels précédents. Utilise des sujets variés et inédits.
+- Évite les questions trop courantes comme "Quelle est la capitale de la France ?" ou "Combien de continents ?".
 - Réponds UNIQUEMENT avec un objet JSON au format : {"questions":[{"question":"...","answers":["...","...","...","..."],"correctIndex":0}]}
 - "correctIndex" est l'index (0 à 3) de la bonne réponse dans "answers".`;
 
@@ -110,6 +111,15 @@ const FALLBACK_BANK = {
     { question: 'Quel animal dit-on être le meilleur ami de l\'homme ?', answers: ['Le chat', 'Le chien', 'Le cheval', 'Le perroquet'], correctIndex: 1 },
     { question: 'Quel est le symbole chimique de l\'eau ?', answers: ['O2', 'CO2', 'H2O', 'H2O2'], correctIndex: 2 },
     { question: 'Combien de jours compte une année bissextile ?', answers: ['364', '365', '366', '367'], correctIndex: 2 },
+    { question: 'Quelle couleur mélange le bleu et le jaune ?', answers: ['Vert', 'Orange', 'Violet', 'Marron'], correctIndex: 0 },
+    { question: 'Combien de pattes a une araignée ?', answers: ['6', '8', '10', '12'], correctIndex: 1 },
+    { question: 'Quel est le plus grand animal terrestre ?', answers: ['L\'éléphant', 'La baleine', 'Le rhinocéros', 'La girafe'], correctIndex: 0 },
+    { question: 'Combien de continents y a-t-il sur Terre ?', answers: ['5', '6', '7', '8'], correctIndex: 2 },
+    { question: 'Quel fruit est jaune et courbé ?', answers: ['La pomme', 'La poire', 'La banane', 'L\'orange'], correctIndex: 2 },
+    { question: 'Combien de jours y a-t-il dans une semaine ?', answers: ['5', '6', '7', '8'], correctIndex: 2 },
+    { question: 'Quelle saison vient après l\'été ?', answers: ['Le printemps', 'L\'automne', 'L\'hiver', 'L\'été'], correctIndex: 1 },
+    { question: 'Quel instrument de musique a des touches noires et blanches ?', answers: ['La guitare', 'Le piano', 'La batterie', 'Le violon'], correctIndex: 1 },
+    { question: 'Combien de doigts a une main ?', answers: ['4', '5', '6', '7'], correctIndex: 1 },
   ],
   moyen: [
     { question: 'En quelle année a eu lieu la Révolution française ?', answers: ['1799', '1789', '1776', '1815'], correctIndex: 1 },
@@ -118,6 +128,15 @@ const FALLBACK_BANK = {
     { question: 'Quelle est la plus grande planète du système solaire ?', answers: ['Saturne', 'Neptune', 'Jupiter', 'La Terre'], correctIndex: 2 },
     { question: 'Qui a écrit « Le Petit Prince » ?', answers: ['Victor Hugo', 'Antoine de Saint-Exupéry', 'Jules Verne', 'Marcel Pagnol'], correctIndex: 1 },
     { question: 'Quel est le plus grand océan du monde ?', answers: ['L\'Atlantique', 'L\'Indien', 'Le Pacifique', 'L\'Arctique'], correctIndex: 2 },
+    { question: 'En quelle année le Titanic a-t-il coulé ?', answers: ['1905', '1912', '1920', '1915'], correctIndex: 1 },
+    { question: 'Quel est le plus haut sommet du monde ?', answers: ['Le Mont Blanc', 'Le Kilimandjaro', 'L\'Everest', 'Le Mont Fuji'], correctIndex: 2 },
+    { question: 'Qui a découvert l\'Amérique en 1492 ?', answers: ['Vasco de Gama', 'Christophe Colomb', 'Magellan', 'Jacques Cartier'], correctIndex: 1 },
+    { question: 'Combien d\'os compte le corps humain adulte ?', answers: ['186', '206', '226', '246'], correctIndex: 1 },
+    { question: 'Quelle est la capitale de l\'Espagne ?', answers: ['Barcelone', 'Séville', 'Madrid', 'Valence'], correctIndex: 2 },
+    { question: 'En quelle année a eu lieu la chute du mur de Berlin ?', answers: ['1985', '1989', '1991', '1993'], correctIndex: 1 },
+    { question: 'Quel gaz compose majoritairement l\'atmosphère terrestre ?', answers: ['L\'oxygène', 'L\'azote', 'Le dioxyde de carbone', 'L\'hydrogène'], correctIndex: 1 },
+    { question: 'Combien de pays y a-t-il dans l\'Union européenne ?', answers: ['25', '27', '29', '31'], correctIndex: 1 },
+    { question: 'Qui a inventé l\'ampoule électrique ?', answers: ['Nikola Tesla', 'Thomas Edison', 'Alexander Graham Bell', 'Albert Einstein'], correctIndex: 1 },
   ],
   difficile: [
     { question: 'Quel est le premier élément du tableau périodique ?', answers: ['L\'hélium', 'L\'oxygène', 'Le carbone', 'L\'hydrogène'], correctIndex: 3 },
@@ -126,6 +145,15 @@ const FALLBACK_BANK = {
     { question: 'En quelle année l\'homme a-t-il marché sur la Lune pour la première fois ?', answers: ['1965', '1972', '1969', '1959'], correctIndex: 2 },
     { question: 'Quel est le plus petit pays du monde ?', answers: ['Monaco', 'Malte', 'L\'Andorre', 'Le Vatican'], correctIndex: 3 },
     { question: 'Qui a composé la Neuvième Symphonie ?', answers: ['Mozart', 'Bach', 'Chopin', 'Beethoven'], correctIndex: 3 },
+    { question: 'Quelle est la capitale du Canada ?', answers: ['Toronto', 'Vancouver', 'Ottawa', 'Montréal'], correctIndex: 2 },
+    { question: 'En quelle année a été créé le World Wide Web ?', answers: ['1985', '1990', '1995', '2000'], correctIndex: 1 },
+    { question: 'Quel est le fleuve le plus long du monde ?', answers: ['L\'Amazone', 'Le Nil', 'Le Mississippi', 'Le Yangtsé'], correctIndex: 1 },
+    { question: 'Combien de pays bordent la Méditerranée ?', answers: ['18', '21', '24', '27'], correctIndex: 1 },
+    { question: 'Quelle est la monnaie du Japon ?', answers: ['Le won', 'Le yuan', 'Le yen', 'Le ringgit'], correctIndex: 2 },
+    { question: 'En quelle année a été fondé l\'État d\'Israël ?', answers: ['1945', '1948', '1950', '1952'], correctIndex: 1 },
+    { question: 'Quel est le désert le plus chaud du monde ?', answers: ['Le Sahara', 'Le désert de Gobi', 'Le désert d\'Atacama', 'Le désert de Kalahari'], correctIndex: 0 },
+    { question: 'Combien de planètes composent notre système solaire ?', answers: ['7', '8', '9', '10'], correctIndex: 1 },
+    { question: 'Quelle est la capitale de la Norvège ?', answers: ['Bergen', 'Oslo', 'Stockholm', 'Helsinki'], correctIndex: 1 },
   ],
   tres_difficile: [
     { question: 'Quelle est la vitesse approximative de la lumière ?', answers: ['150 000 km/s', '300 000 km/s', '1 000 000 km/s', '30 000 km/s'], correctIndex: 1 },
@@ -134,6 +162,15 @@ const FALLBACK_BANK = {
     { question: 'Quelle est la capitale de la Nouvelle-Zélande ?', answers: ['Auckland', 'Christchurch', 'Wellington', 'Canberra'], correctIndex: 2 },
     { question: 'Combien de dents possède un adulte en moyenne ?', answers: ['28', '36', '32', '24'], correctIndex: 2 },
     { question: 'Quel est le plus grand organe du corps humain ?', answers: ['Le foie', 'Les poumons', 'Le cerveau', 'La peau'], correctIndex: 3 },
+    { question: 'En quelle année a été signé le traité de Rome ?', answers: ['1950', '1957', '1962', '1969'], correctIndex: 1 },
+    { question: 'Quel est le point le plus bas sur Terre ?', answers: ['La mer Morte', 'La fosse des Mariannes', 'Le lac Baïkal', 'La vallée de la Mort'], correctIndex: 0 },
+    { question: 'Combien de chromosomes possède l\'être humain ?', answers: ['23', '46', '44', '48'], correctIndex: 1 },
+    { question: 'Quelle est la capitale du Bhoutan ?', answers: ['Thimphou', 'Paro', 'Punakha', 'Wangdue'], correctIndex: 0 },
+    { question: 'En quelle année a eu lieu la bataille de Waterloo ?', answers: ['1805', '1812', '1815', '1820'], correctIndex: 2 },
+    { question: 'Quel est le métal le plus abondant dans la croûte terrestre ?', answers: ['Le fer', 'L\'aluminium', 'Le cuivre', 'Le zinc'], correctIndex: 1 },
+    { question: 'Combien d\'espèces de pingouins existent-elles ?', answers: ['12', '17', '22', '27'], correctIndex: 1 },
+    { question: 'Quelle est la capitale du Suriname ?', answers: ['Paramaribo', 'Lelydorp', 'Nieuw Nickerie', 'Albina'], correctIndex: 0 },
+    { question: 'En quelle année a été découverte la pénicilline ?', answers: ['1925', '1928', '1932', '1935'], correctIndex: 1 },
   ],
 };
 
