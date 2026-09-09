@@ -59,9 +59,15 @@ async function buildAIPrompt() {
   const usedQuestions = await getUsedQuestionsText();
   return `Tu es le générateur officiel du quiz de l'application.
 
-Génère 20 questions originales de culture générale.
+IMPORTANT : GÉNÈRE EXCLUSIVEMENT DES QUESTIONS ET RÉPONSES EN FRANÇAIS. AUCUNE QUESTION EN ANGLAIS OU AUTRE LANGUE.
 
-Contraintes :
+Génère 20 questions originales de culture générale en FRANÇAIS.
+
+Contraintes OBLIGATOIRES :
+- TOUTES les questions doivent être en FRANÇAIS pur et correct.
+- TOUTES les réponses doivent être en FRANÇAIS pur et correct.
+- NE JAMAIS générer de questions en anglais.
+- NE JAMAIS utiliser de noms propres anglais (ex: "Dan Bell", "Hollywood") sauf si c'est un nom international connu.
 - Chaque question possède exactement 4 réponses.
 - Une seule réponse est correcte.
 - Les questions doivent être adaptées à des adultes.
