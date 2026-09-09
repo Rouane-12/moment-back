@@ -51,7 +51,8 @@ const DIFFICULTY_MAPPING = {
 async function fetchOpenTDBQuestions(amount = 20, difficulty = undefined, category = undefined, token = undefined) {
   const params = {
     amount: Math.min(amount, 50),
-    type: 'multiple' // Multiple choice only
+    type: 'multiple', // Multiple choice only
+    lang: 'fr' // Force French language
   };
   
   if (difficulty) params.difficulty = difficulty;

@@ -397,4 +397,85 @@ router.delete('/conversation/:conversationId/hide', auth, async (req, res, next)
   }
 });
 
+// Generate invitation link (for remote connection)
+router.post('/generate-invitation-link', auth, async (req, res, next) => {
+  try {
+    // Generate a unique token for this invitation
+    const token = crypto.randomBytes(32).toString('hex');
+    
+    // Store token with user info and expiry (5 minutes)
+    if (!global.invitationTokens) global.invitationTokens = {};
+    global.invitationTokens[token] = {
+      userId: req.user._id,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 5 * 60 * 1000 // 5 minutes
+    };
+    
+    // Generate the full link
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const invitationLink = `${baseUrl}/chat?invite=${token}`;
+    
+    res.json({ success: true, token, link: invitationLink });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Accept invitation link (for remote connection)
+router.post('/accept-invitation-link', auth, async (req, res, next) => {
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'Token manquant' });
+    }
+    
+    // Check if token exists and is valid
+    if (!global.invitationTokens || !global.invitationTokens[token]) {
+      return res.status(400).json({ success: false, message: 'Lien invalide ou expiré' });
+    }
+    
+    const invitationData = global.invitationTokens[token];
+    
+    // Check if token is expired
+    if (Date.now() > invitationData.expiresAt) {
+      delete global.invitationTokens[token];
+      return res.status(400).json({ success: false, message: 'Lien expiré' });
+    }
+    
+    // Check if user is trying to invite themselves
+    if (invitationData.userId.toString() === req.user._id.toString()) {
+      return res.status(400).json({ success: false, message: 'Vous ne pouvez pas vous inviter vous-même' });
+    }
+    
+    // Get the inviter's info
+    const inviter = await User.findById(invitationData.userId)
+      .select('firstName lastName role avatar');
+    
+    if (!inviter) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+    }
+    
+    // Delete used token
+    delete global.invitationTokens[token];
+    
+    // Create a welcome message to establish the conversation
+    const conversationId = getConversationId(req.user._id, inviter._id);
+    const existingMessages = await Message.countDocuments({ conversationId });
+    
+    if (existingMessages === 0) {
+      await Message.create({
+        sender: inviter._id,
+        receiver: req.user._id,
+        conversationId,
+        content: `Hey ! 👋 On est connectés via lien d'invitation. Discutons !`,
+      });
+    }
+    
+    res.json({ success: true, user: inviter, conversationId });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;
