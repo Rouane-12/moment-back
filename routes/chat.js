@@ -404,11 +404,15 @@ router.post('/generate-invitation-link', auth, async (req, res, next) => {
     // Generate a unique token for this invitation
     const token = crypto.randomBytes(32).toString('hex');
     
-    // Store token in database with user info and expiry (5 minutes)
+    // Un lien partagé (SMS, WhatsApp…) peut mettre du temps avant d'être ouvert :
+    // 24h par défaut, ajustable via INVITE_LINK_TTL_MINUTES (ex: 60 pour 1h).
+    const ttlMinutes = parseInt(process.env.INVITE_LINK_TTL_MINUTES, 10) || 1440;
+    
+    // Store token in database with user info and expiry
     const invitationToken = new InvitationToken({
       token,
       userId: req.user._id,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
+      expiresAt: new Date(Date.now() + ttlMinutes * 60 * 1000)
     });
     
     await invitationToken.save();
@@ -417,7 +421,7 @@ router.post('/generate-invitation-link', auth, async (req, res, next) => {
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const invitationLink = `${baseUrl}/chat?invite=${token}`;
     
-    res.json({ success: true, token, link: invitationLink });
+    res.json({ success: true, token, link: invitationLink, expiresInMinutes: ttlMinutes });
   } catch (error) {
     next(error);
   }
@@ -426,16 +430,30 @@ router.post('/generate-invitation-link', auth, async (req, res, next) => {
 // Accept invitation link (for remote connection)
 router.post('/accept-invitation-link', auth, async (req, res, next) => {
   try {
-    const { token } = req.body;
+    let { token } = req.body;
     
     if (!token) {
       return res.status(400).json({ success: false, message: 'Token manquant' });
+    }
+    
+    // L'utilisateur peut coller le lien complet au lieu du code seul :
+    // https://moment-front.vercel.app/chat?invite=abc123… → on extrait le token.
+    token = String(token).trim();
+    const inviteMatch = token.match(/[?&]invite=([0-9a-fA-F]+)/);
+    if (inviteMatch) token = inviteMatch[1];
+    if (!/^[0-9a-fA-F]{32,64}$/.test(token)) {
+      return res.status(400).json({ success: false, message: 'Lien invalide ou expiré' });
     }
     
     // Check if token exists and is valid in database
     const invitationData = await InvitationToken.findOne({ token, used: false });
     
     if (!invitationData) {
+      // Distinguish "déjà utilisé" from "inconnu/purge par TTL"
+      const existing = await InvitationToken.findOne({ token });
+      if (existing && existing.used) {
+        return res.status(400).json({ success: false, message: 'Ce lien a déjà été utilisé' });
+      }
       return res.status(400).json({ success: false, message: 'Lien invalide ou expiré' });
     }
     

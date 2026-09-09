@@ -70,14 +70,17 @@ Contraintes :
   histoire, géographie, sciences, art, littérature, musique,
   cinéma, technologie, économie, culture africaine, monde,
   société, sport, architecture, mythologie, etc.
-- Évite les questions extrêmement connues ou évidentes.
+- Évite les questions extrêmement connues ou évidentes : aucun classique grand public.
 - La difficulté doit progressivement augmenter.
 - Les questions 1 à 5 : moyen
 - 6 à 10 : moyen/difficile
 - 11 à 15 : difficile
 - 16 à 20 : très difficile
+- CHAQUE partie doit être entièrement nouvelle : ne réutilise jamais une question, un sujet ou un fait déjà généré lors d'une partie précédente.
 - Ne reformule jamais une question déjà fournie précédemment.
 - Ne produis jamais une question portant sur exactement le même fait qu'une question précédente.
+- Varie largement les thèmes d'une question à l'autre : ne mets pas deux questions du même domaine à la suite.
+- Privilégie des questions précises, originales et peu connues du grand public.
 - Les quatre propositions doivent être plausibles.
 - Ne crée aucune réponse ambiguë.
 - Une réponse doit être factuellement vérifiable.
@@ -122,7 +125,7 @@ async function generateQuizPack() {
     'https://api.openai.com/v1/chat/completions',
     {
       model: 'gpt-4o-mini',
-      temperature: 1.0,
+      temperature: 1.1,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: prompt },
@@ -165,6 +168,21 @@ const FALLBACK_BANK = {
     { question: 'Quelle saison vient après l\'été ?', answers: ['Le printemps', 'L\'automne', 'L\'hiver', 'L\'été'], correctIndex: 1 },
     { question: 'Quel instrument de musique a des touches noires et blanches ?', answers: ['La guitare', 'Le piano', 'La batterie', 'Le violon'], correctIndex: 1 },
     { question: 'Combien de doigts a une main ?', answers: ['4', '5', '6', '7'], correctIndex: 1 },
+    { question: 'Quel est le contraire de « chaud » ?', answers: ['Froid', 'Tiède', 'Humide', 'Sec'], correctIndex: 0 },
+    { question: 'Combien de côtés possède un carré ?', answers: ['3', '4', '5', '6'], correctIndex: 1 },
+    { question: 'Quel animal est le symbole de la Chine ?', answers: ['Le tigre', 'Le panda', 'Le dragon', 'L\'éléphant'], correctIndex: 1 },
+    { question: 'Combien de minutes compte une heure ?', answers: ['50', '60', '70', '100'], correctIndex: 1 },
+    { question: 'Quel jour vient juste après mardi ?', answers: ['Lundi', 'Mercredi', 'Jeudi', 'Vendredi'], correctIndex: 1 },
+    { question: 'Combien de roues possède une voiture classique ?', answers: ['2', '4', '6', '8'], correctIndex: 1 },
+    { question: 'Quel instrument utilise-t-on pour peser ?', answers: ['La règle', 'La balance', 'Le thermomètre', 'Le compas'], correctIndex: 1 },
+    { question: 'Quel est le pluriel de « cheval » ?', answers: ['chevails', 'chevales', 'chevaux', 'chevauxs'], correctIndex: 2 },
+    { question: 'Combien d\'heures compte une journée ?', answers: ['12', '24', '36', '48'], correctIndex: 1 },
+    { question: 'Quelle boisson est fabriquée à partir de raisins ?', answers: ['La bière', 'Le lait', 'Le cidre', 'Le vin'], correctIndex: 3 },
+    { question: 'Dans quel pays est née la pizza ?', answers: ['En France', 'En Espagne', 'En Italie', 'Au Portugal'], correctIndex: 2 },
+    { question: 'Combien de doigts y a-t-il sur deux mains ?', answers: ['8', '10', '12', '20'], correctIndex: 1 },
+    { question: 'Quel mois vient juste après juin ?', answers: ['Mai', 'Juillet', 'Août', 'Septembre'], correctIndex: 1 },
+    { question: 'Quel animal fabrique le miel ?', answers: ['La guêpe', 'La mouche', 'Le papillon', 'L\'abeille'], correctIndex: 3 },
+    { question: 'Combien de saisons compte une année ?', answers: ['2', '3', '4', '5'], correctIndex: 2 },
   ],
   moyen: [
     { question: 'En quelle année a eu lieu la Révolution française ?', answers: ['1799', '1789', '1776', '1815'], correctIndex: 1 },
@@ -182,6 +200,21 @@ const FALLBACK_BANK = {
     { question: 'Quel gaz compose majoritairement l\'atmosphère terrestre ?', answers: ['L\'oxygène', 'L\'azote', 'Le dioxyde de carbone', 'L\'hydrogène'], correctIndex: 1 },
     { question: 'Combien de pays y a-t-il dans l\'Union européenne ?', answers: ['25', '27', '29', '31'], correctIndex: 1 },
     { question: 'Qui a inventé l\'ampoule électrique ?', answers: ['Nikola Tesla', 'Thomas Edison', 'Alexander Graham Bell', 'Albert Einstein'], correctIndex: 1 },
+    { question: 'Qui a écrit « Les Misérables » ?', answers: ['Émile Zola', 'Gustave Flaubert', 'Alexandre Dumas', 'Victor Hugo'], correctIndex: 3 },
+    { question: 'Quelle est la capitale de l\'Italie ?', answers: ['Milan', 'Naples', 'Rome', 'Turin'], correctIndex: 2 },
+    { question: 'En quelle année a commencé la Première Guerre mondiale ?', answers: ['1912', '1914', '1916', '1918'], correctIndex: 1 },
+    { question: 'Quel est le plus long fleuve d\'Europe ?', answers: ['Le Rhin', 'La Volga', 'Le Danube', 'La Seine'], correctIndex: 1 },
+    { question: 'Qui a écrit « Roméo et Juliette » ?', answers: ['Charles Dickens', 'Molière', 'Johann Wolfgang von Goethe', 'William Shakespeare'], correctIndex: 3 },
+    { question: 'Quelle est la capitale du Maroc ?', answers: ['Casablanca', 'Marrakech', 'Rabat', 'Fès'], correctIndex: 2 },
+    { question: 'Combien de joueurs compose une équipe de football ?', answers: ['9', '10', '11', '12'], correctIndex: 2 },
+    { question: 'Quel est le deuxième plus grand océan du monde ?', answers: ['L\'Atlantique', 'L\'Indien', 'Le Pacifique', 'L\'Arctique'], correctIndex: 0 },
+    { question: 'Qui a peint « Guernica » ?', answers: ['Salvador Dalí', 'Pablo Picasso', 'Joan Miró', 'Francisco Goya'], correctIndex: 1 },
+    { question: 'Quelle est la monnaie du Royaume-Uni ?', answers: ['L\'euro', 'La livre sterling', 'Le dollar', 'Le franc suisse'], correctIndex: 1 },
+    { question: 'Quel organe pompe le sang dans le corps humain ?', answers: ['Le foie', 'Les poumons', 'Le cœur', 'Le rein'], correctIndex: 2 },
+    { question: 'Quelle est la capitale du Brésil ?', answers: ['Rio de Janeiro', 'São Paulo', 'Brasilia', 'Salvador'], correctIndex: 2 },
+    { question: 'Qui a découvert la pénicilline ?', answers: ['Louis Pasteur', 'Alexander Fleming', 'Marie Curie', 'Robert Koch'], correctIndex: 1 },
+    { question: 'Quel compositeur a poursuivi sa carrière malgré sa surdité ?', answers: ['Wolfgang Amadeus Mozart', 'Johann Sebastian Bach', 'Ludwig van Beethoven', 'Frédéric Chopin'], correctIndex: 2 },
+    { question: 'Quelle est la capitale de l\'Algérie ?', answers: ['Oran', 'Constantine', 'Alger', 'Annaba'], correctIndex: 2 },
   ],
   difficile: [
     { question: 'Quel est le premier élément du tableau périodique ?', answers: ['L\'hélium', 'L\'oxygène', 'Le carbone', 'L\'hydrogène'], correctIndex: 3 },
@@ -199,6 +232,21 @@ const FALLBACK_BANK = {
     { question: 'Quel est le désert le plus chaud du monde ?', answers: ['Le Sahara', 'Le désert de Gobi', 'Le désert d\'Atacama', 'Le désert de Kalahari'], correctIndex: 0 },
     { question: 'Combien de planètes composent notre système solaire ?', answers: ['7', '8', '9', '10'], correctIndex: 1 },
     { question: 'Quelle est la capitale de la Norvège ?', answers: ['Bergen', 'Oslo', 'Stockholm', 'Helsinki'], correctIndex: 1 },
+    { question: 'Quelle est la capitale de l\'Argentine ?', answers: ['Santiago', 'Buenos Aires', 'Montevideo', 'Lima'], correctIndex: 1 },
+    { question: 'Qui a développé la théorie de la relativité ?', answers: ['Isaac Newton', 'Niels Bohr', 'Max Planck', 'Albert Einstein'], correctIndex: 3 },
+    { question: 'Quel est le plus grand lac d\'Afrique ?', answers: ['Le lac Victoria', 'Le lac Tanganyika', 'Le lac Tchad', 'Le lac Malawi'], correctIndex: 0 },
+    { question: 'Quelle est la capitale de la Turquie ?', answers: ['Istanbul', 'Ankara', 'Izmir', 'Bursa'], correctIndex: 1 },
+    { question: 'Combien de cordes possède une guitare classique ?', answers: ['4', '6', '7', '12'], correctIndex: 1 },
+    { question: 'Qui a écrit « L\'Étranger » ?', answers: ['Jean-Paul Sartre', 'Albert Camus', 'André Gide', 'François Mauriac'], correctIndex: 1 },
+    { question: 'Quel est le plus haut sommet d\'Afrique ?', answers: ['Le mont Kenya', 'Le Kilimandjaro', 'Le mont Toubkal', 'Le Ruwenzori'], correctIndex: 1 },
+    { question: 'Quelle est la capitale du Portugal ?', answers: ['Porto', 'Lisbonne', 'Braga', 'Faro'], correctIndex: 1 },
+    { question: 'En quelle année a été signé le traité de Versailles ?', answers: ['1917', '1918', '1919', '1920'], correctIndex: 2 },
+    { question: 'Quel fleuve traverse Paris ?', answers: ['Le Rhône', 'La Loire', 'La Seine', 'La Garonne'], correctIndex: 2 },
+    { question: 'Quel pays a inventé le papier ?', answers: ['L\'Égypte', 'La Grèce', 'La Chine', 'La Perse'], correctIndex: 2 },
+    { question: 'Quelle est la capitale du Kenya ?', answers: ['Mombasa', 'Nairobi', 'Kisumu', 'Dakar'], correctIndex: 1 },
+    { question: 'Combien de diagonales possède un pentagone ?', answers: ['3', '5', '7', '10'], correctIndex: 1 },
+    { question: 'Qui a peint « La Nuit étoilée » ?', answers: ['Claude Monet', 'Paul Cézanne', 'Pierre-Auguste Renoir', 'Vincent van Gogh'], correctIndex: 3 },
+    { question: 'Quelle est la capitale de la Suède ?', answers: ['Göteborg', 'Malmö', 'Stockholm', 'Uppsala'], correctIndex: 2 },
   ],
   tres_difficile: [
     { question: 'Quelle est la vitesse approximative de la lumière ?', answers: ['150 000 km/s', '300 000 km/s', '1 000 000 km/s', '30 000 km/s'], correctIndex: 1 },
@@ -216,6 +264,22 @@ const FALLBACK_BANK = {
     { question: 'Combien d\'espèces de pingouins existent-elles ?', answers: ['12', '17', '22', '27'], correctIndex: 1 },
     { question: 'Quelle est la capitale du Suriname ?', answers: ['Paramaribo', 'Lelydorp', 'Nieuw Nickerie', 'Albina'], correctIndex: 0 },
     { question: 'En quelle année a été découverte la pénicilline ?', answers: ['1925', '1928', '1932', '1935'], correctIndex: 1 },
+    { question: 'Quelle est la capitale du Kazakhstan ?', answers: ['Almaty', 'Astana', 'Bichkek', 'Tachkent'], correctIndex: 1 },
+    { question: 'Quel est l\'élément le plus abondant de l\'univers ?', answers: ['L\'oxygène', 'L\'hydrogène', 'L\'hélium', 'Le carbone'], correctIndex: 1 },
+    { question: 'Combien de pays composent le Royaume-Uni ?', answers: ['3', '4', '5', '6'], correctIndex: 1 },
+    { question: 'Quel est le plus petit pays d\'Afrique ?', answers: ['Les Seychelles', 'Les Comores', 'Le Cap-Vert', 'La Gambie'], correctIndex: 0 },
+    { question: 'Quelle est la capitale de l\'Uruguay ?', answers: ['Buenos Aires', 'Montevideo', 'Asuncion', 'Santiago'], correctIndex: 1 },
+    { question: 'En quelle année a été fondée l\'ONU ?', answers: ['1943', '1945', '1947', '1950'], correctIndex: 1 },
+    { question: 'Quel est le plus long fleuve d\'Asie ?', answers: ['Le Gange', 'Le Mékong', 'Le Yangtsé', 'Le Huang He'], correctIndex: 2 },
+    { question: 'Combien de vertèbres compte la colonne vertébrale humaine ?', answers: ['26', '33', '40', '48'], correctIndex: 1 },
+    { question: 'Qui a écrit « Guerre et Paix » ?', answers: ['Fiodor Dostoïevski', 'Léon Tolstoï', 'Anton Tchekhov', 'Ivan Tourgueniev'], correctIndex: 1 },
+    { question: 'Combien de dents de lait possède un enfant ?', answers: ['20', '24', '28', '32'], correctIndex: 0 },
+    { question: 'Quelle est la capitale de la Mongolie ?', answers: ['Oulan-Bator', 'Oulan-Oude', 'Pékin', 'Astana'], correctIndex: 0 },
+    { question: 'En quelle année l\'apartheid a-t-il pris fin en Afrique du Sud ?', answers: ['1990', '1992', '1994', '1996'], correctIndex: 2 },
+    { question: 'Quelle est la capitale de l\'Islande ?', answers: ['Reykjavik', 'Oslo', 'Helsinki', 'Copenhague'], correctIndex: 0 },
+    { question: 'Quel est le plus petit État des États-Unis ?', answers: ['Delaware', 'Rhode Island', 'Hawaï', 'Vermont'], correctIndex: 1 },
+    { question: 'Quelle est la capitale de l\'Angola ?', answers: ['Luanda', 'Lagos', 'Maputo', 'Kinshasa'], correctIndex: 0 },
+    { question: 'En quelle année a eu lieu la première Coupe du monde de football ?', answers: ['1928', '1930', '1934', '1938'], correctIndex: 1 },
   ],
 };
 
@@ -312,6 +376,15 @@ async function fetchUnusedQuestions(count) {
       .sort({ usedCount: 1, lastUsedAt: 1 })
       .limit(count)
       .lean();
+
+    // Marque l'utilisation pour ne jamais resservir les mêmes questions
+    // en boucle : elles repartent en fin de file (usedCount + lastUsedAt).
+    if (questions.length > 0) {
+      await QuizQuestion.updateMany(
+        { _id: { $in: questions.map(q => q._id) } },
+        { $inc: { usedCount: 1 }, $set: { lastUsedAt: new Date() } }
+      );
+    }
     
     return questions.map(q => ({
       id: q._id.toString(),
@@ -327,6 +400,11 @@ async function fetchUnusedQuestions(count) {
     return [];
   }
 }
+
+// Mémoire des questions de secours récemment servies (FIFO) : même si l'IA,
+// la base et OpenTDB sont tous indisponibles, deux parties de suite ne
+// retombent jamais sur les mêmes questions de la banque locale.
+const recentFallbackQuestions = [];
 
 async function fallbackPack() {
   // Try to fetch from database first
@@ -366,13 +444,25 @@ async function fallbackPack() {
   const pack = [];
   let id = 1;
   for (const tier of TIERS) {
-    const pool = shuffleIndices(FALLBACK_BANK[tier].length)
+    const bank = FALLBACK_BANK[tier];
+    if (!bank || bank.length === 0) continue; // 'expert' n'a pas de banque locale
+    // On évite les questions servies très récemment (les banques ont 30+ entrées
+    // par niveau, donc plusieurs parties sans répétition avant réinitialisation).
+    const recentlyUsed = new Set(recentFallbackQuestions);
+    let candidates = bank.filter(q => !recentlyUsed.has(q.question));
+    if (candidates.length < 5) {
+      recentFallbackQuestions.length = 0; // banque épuisée : on repart du début
+      candidates = bank;
+    }
+    const pool = shuffleIndices(candidates.length)
       .slice(0, 5)
-      .map(i => FALLBACK_BANK[tier][i]);
+      .map(i => candidates[i]);
     for (const q of pool) {
+      recentFallbackQuestions.push(q.question);
       pack.push({ id: `q${id++}`, ...q, difficulty: tier, points: TIER_POINTS[tier] });
     }
   }
+  if (recentFallbackQuestions.length > 80) recentFallbackQuestions.splice(0, recentFallbackQuestions.length - 80);
   return pack;
 }
 
@@ -611,4 +701,8 @@ module.exports = {
   buildQuizView,
   emitQuizState,
   clearQuizTimers,
+  // Exposés pour les tests
+  FALLBACK_BANK,
+  TIERS,
+  fallbackPack,
 };
