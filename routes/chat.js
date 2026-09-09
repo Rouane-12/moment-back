@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const InvitationToken = require('../models/InvitationToken');
 const { auth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -403,13 +404,14 @@ router.post('/generate-invitation-link', auth, async (req, res, next) => {
     // Generate a unique token for this invitation
     const token = crypto.randomBytes(32).toString('hex');
     
-    // Store token with user info and expiry (5 minutes)
-    if (!global.invitationTokens) global.invitationTokens = {};
-    global.invitationTokens[token] = {
+    // Store token in database with user info and expiry (5 minutes)
+    const invitationToken = new InvitationToken({
+      token,
       userId: req.user._id,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 5 * 60 * 1000 // 5 minutes
-    };
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
+    });
+    
+    await invitationToken.save();
     
     // Generate the full link
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -430,16 +432,16 @@ router.post('/accept-invitation-link', auth, async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Token manquant' });
     }
     
-    // Check if token exists and is valid
-    if (!global.invitationTokens || !global.invitationTokens[token]) {
+    // Check if token exists and is valid in database
+    const invitationData = await InvitationToken.findOne({ token, used: false });
+    
+    if (!invitationData) {
       return res.status(400).json({ success: false, message: 'Lien invalide ou expiré' });
     }
     
-    const invitationData = global.invitationTokens[token];
-    
     // Check if token is expired
-    if (Date.now() > invitationData.expiresAt) {
-      delete global.invitationTokens[token];
+    if (Date.now() > invitationData.expiresAt.getTime()) {
+      await InvitationToken.deleteOne({ token });
       return res.status(400).json({ success: false, message: 'Lien expiré' });
     }
     
@@ -456,8 +458,8 @@ router.post('/accept-invitation-link', auth, async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
     }
     
-    // Delete used token
-    delete global.invitationTokens[token];
+    // Mark token as used
+    await InvitationToken.updateOne({ token }, { used: true });
     
     // Create a welcome message to establish the conversation
     const conversationId = getConversationId(req.user._id, inviter._id);
