@@ -498,4 +498,73 @@ router.post('/accept-invitation-link', auth, async (req, res, next) => {
   }
 });
 
+// Get all past contacts (users ever interacted with, including hidden conversations)
+router.get('/past-contacts', auth, async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+
+    // Find all unique users this person has ever messaged with
+    const sentConversations = await Message.aggregate([
+      { $match: { sender: userId } },
+      { $group: { _id: '$receiver' } }
+    ]);
+
+    const receivedConversations = await Message.aggregate([
+      { $match: { receiver: userId } },
+      { $group: { _id: '$sender' } }
+    ]);
+
+    // Combine all unique user IDs
+    const userIds = new Set();
+    sentConversations.forEach(c => userIds.add(c._id.toString()));
+    receivedConversations.forEach(c => userIds.add(c._id.toString()));
+
+    // Remove self
+    userIds.delete(userId.toString());
+
+    // Get user details for all contacts
+    const contacts = await Promise.all(
+      Array.from(userIds).map(async (contactId) => {
+        const user = await User.findById(contactId).select('firstName lastName role avatar');
+        if (!user) return null;
+
+        // Get last message with this contact
+        const conversationId = getConversationId(userId, contactId);
+        const lastMessage = await Message.findOne({ conversationId })
+          .sort({ createdAt: -1 })
+          .select('content createdAt sender attachments')
+          .lean();
+
+        // Count total messages exchanged
+        const messageCount = await Message.countDocuments({ conversationId });
+
+        return {
+          user,
+          lastMessage: lastMessage ? {
+            content: lastMessage.content,
+            createdAt: lastMessage.createdAt,
+            sender: lastMessage.sender,
+            attachments: lastMessage.attachments || [],
+          } : null,
+          messageCount,
+          conversationId,
+        }
+      })
+    );
+
+    // Sort by last message time (most recent first)
+    const sorted = contacts
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (!a.lastMessage) return 1;
+        if (!b.lastMessage) return -1;
+        return new Date(b.lastMessage.createdAt).getTime() - new Date(a.lastMessage.createdAt).getTime();
+      });
+
+    res.json({ success: true, contacts: sorted });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

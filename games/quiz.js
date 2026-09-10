@@ -14,7 +14,7 @@
 const axios = require('axios');
 const QuizQuestion = require('../models/QuizQuestion');
 const { normalizeText, createHash, isExactDuplicate, isSemanticSimilar, normalizeQuestion } = require('../utils/quizDuplicateChecker');
-const { fetchOpenTDBQuestions, requestSessionToken } = require('../utils/openTDB');
+// OpenTDB removed - returns English questions. Using only AI + local French bank.
 
 const PACK_SIZE = 20;
 const QUESTION_TIME_MS = 20000; // 20s par question
@@ -23,7 +23,7 @@ const TIERS = ['facile', 'moyen', 'difficile', 'tres_difficile', 'expert'];
 const TIER_POINTS = { facile: 100, moyen: 200, difficile: 300, tres_difficile: 500, expert: 600 };
 
 // OpenTDB session token (initialized on first use)
-let opentdbToken = null;
+// opentdbToken removed - no longer using OpenTDB
 
 function createGameId() {
   return Math.random().toString(36).substring(2, 10);
@@ -55,10 +55,10 @@ async function getUsedQuestionsText() {
   }
 }
 
-// Vérifie si une question est en français (détection simple)
+// Vérifie si une question est en français (détection robuste)
 function isFrenchQuestion(question) {
   const questionText = question.question.toLowerCase();
-  const answersText = question.answers.join(' ').toLowerCase();
+  const allText = (question.question + ' ' + question.answers.join(' ')).toLowerCase();
 
   // Rejet immédiat si la question commence par un mot anglais interrogatif
   const englishQuestionStarters = ['what', 'where', 'when', 'who', 'why', 'how', 'which', 'whose', 'whom'];
@@ -67,11 +67,20 @@ function isFrenchQuestion(question) {
     return false;
   }
 
-  // Rejet immédiat si les réponses contiennent trop de mots anglais
-  const englishWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those', 'a', 'an'];
-  const answerEnglishCount = englishWords.filter(word => answersText.includes(word)).length;
-  if (answerEnglishCount > 2) {
-    console.log(`REJECTED (too many English words in answers): ${question.question}`);
+  // Rejet si des mots anglais courants apparaissent dans les réponses
+  const englishWordsInAnswers = ['the ', ' an ', ' and ', ' is ', ' are ', ' was ', ' were ', ' has ', ' have ', ' had ', ' can ', ' will ', ' does ', ' did ', ' do ', ' for ', ' from ', ' with ', ' that ', ' this ', ' these ', ' those ', 'historic', 'landmarks', 'documentaries', 'abandoned', 'buildings', 'malls', 'action', 'films', 'liver', 'pancreas', 'stomach', 'gallbladder', 'produces', 'typically', 'focus'];
+  for (const word of englishWordsInAnswers) {
+    if (allText.includes(word)) {
+      console.log(`REJECTED (English word found in answers): ${question.question}`);
+      return false;
+    }
+  }
+
+  // Vérifie que la question contient au moins un mot français courant
+  const frenchMarkers = ['quelle', 'quel', 'quels', 'quelles', 'qui', 'comment', 'combien', 'pourquoi', 'où', 'quand', 'dans', 'avec', 'peut', 'est', 'sont', 'été', 'avoir', 'être', 'les', 'des', 'une', 'du', 'la', 'le', 'l\'', 'au', 'aux', 'ce', 'cette', 'ces', 'mon', 'ton', 'son', 'notre', 'votre', 'leur', 'plus', 'moins', 'aussi', 'très', 'bien', 'mal', 'faire', 'dire', 'aller', 'venir', 'prendre', 'donner', 'voir', 'savoir', 'pouvoir', 'vouloir'];
+  const hasFrenchMarker = frenchMarkers.some(marker => questionText.includes(marker));
+  if (!hasFrenchMarker) {
+    console.log(`REJECTED (no French marker found): ${question.question}`);
     return false;
   }
 
@@ -538,27 +547,6 @@ async function fallbackPack() {
     }
   } catch (error) {
     console.error('Error fetching from database:', error.message);
-  }
-  
-  // Try OpenTDB as second fallback
-  try {
-    if (!opentdbToken) {
-      opentdbToken = await requestSessionToken();
-      if (opentdbToken) console.log('OpenTDB session token acquired');
-    }
-    
-    if (opentdbToken) {
-      const opentdbQuestions = await fetchOpenTDBQuestions(PACK_SIZE, undefined, undefined, opentdbToken);
-      if (opentdbQuestions.length >= PACK_SIZE) {
-        console.log('Using questions from OpenTDB');
-        const filtered = await filterAndSaveQuestions(opentdbQuestions, 'opentdb');
-        if (filtered.length >= PACK_SIZE) {
-          return filtered.slice(0, PACK_SIZE);
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error fetching from OpenTDB:', error.message);
   }
   
   // Final fallback to local bank

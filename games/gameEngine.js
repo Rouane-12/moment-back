@@ -4,6 +4,12 @@
  */
 
 const { createQuizGame, quizAccept, quizAnswer, quizNext, quizRematch, buildQuizView, clearQuizTimers } = require('./quiz');
+const { createBuzzerQuiz, addPlayer, removePlayer, onBuzz, submitAnswer: buzzerSubmitAnswer, quizAccept: buzzerAccept, quizRematch: buzzerRematch, buildBuzzerView, emitBuzzerState } = require('./buzzerQuiz');
+const { createCodeSecretGame, makeGuess, switchRoles: codeSecretSwitchRoles, codeSecretAccept, codeSecretRematch, emitCodeSecretState } = require('./codeSecret');
+const { createMotIntrusGame, submitAnswer: motIntrusSubmit, motIntrusAccept, motIntrusRematch, emitMotIntrusState } = require('./motIntrus');
+const { createDevineCeQueJePenseGame, submitQuestion, submitAnswer: devineSubmitAnswer, guessItem, switchRoles: devineSwitchRoles, devineAccept, devineRematch, emitDevineState } = require('./devineCeQueJePense');
+const { createAQuelPointGame, setAnswer: aqpSetAnswer, answerQuestion: aqpAnswer, aQuelPointAccept, aQuelPointRematch, emitAQuelPointState } = require('./aQuelPoint');
+const { createDeuxVeritesGame, submitStatements, submitGuess, deuxVeritesAccept, deuxVeritesRematch, emitDeuxVeritesState } = require('./deuxVerites');
 
 const activeGames = new Map();
 
@@ -268,6 +274,73 @@ function diceRematch(game, io) {
 // SOCKET EVENT HANDLERS
 // ══════════════════════════════════════
 function setupGameEvents(socket, io, getUserId) {
+  // Create buzzer quiz from games page
+  socket.on('buzzer-create', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = createBuzzerQuiz(userId, io);
+    activeGames.set(game.id, game);
+    console.log(`🎯 Buzzer Quiz created by ${userId}`);
+    io.to(`user:${userId}`).emit('game-invite', { game: buildBuzzerView(game, userId), from: userId });
+  });
+
+  // Add player to buzzer quiz
+  socket.on('buzzer-add-player', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'buzzer_quiz') return;
+    if (game.createdBy !== userId) return; // only creator can add
+    addPlayer(game, data.playerId, io);
+  });
+
+  // Remove player from buzzer quiz
+  socket.on('buzzer-remove-player', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'buzzer_quiz') return;
+    removePlayer(game, data.playerId, io);
+  });
+
+  // Start buzzer quiz
+  socket.on('buzzer-start', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'buzzer_quiz') return;
+    if (game.createdBy !== userId) return;
+    game.state = 'playing';
+    buzzerAccept(game, io);
+  });
+
+  // Buzz!
+  socket.on('buzzer-buzz', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'buzzer_quiz') return;
+    onBuzz(game, userId, io);
+  });
+
+  // Submit answer after buzzing
+  socket.on('buzzer-answer', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'buzzer_quiz') return;
+    buzzerSubmitAnswer(game, userId, data.answerIndex, io);
+  });
+
+  // Join buzzer quiz (for invited players)
+  socket.on('buzzer-join', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'buzzer_quiz') return;
+    addPlayer(game, userId, io);
+  });
+
   socket.on('game-invite', (data) => {
     const userId = getUserId(socket);
     if (!userId) return;
@@ -279,6 +352,11 @@ function setupGameEvents(socket, io, getUserId) {
       case 'rps': game = createRPSGame(userId, to); break;
       case 'dice': game = createDiceGame(userId, to); break;
       case 'quiz': game = createQuizGame(userId, to, io); break;
+      case 'code_secret': game = createCodeSecretGame(userId, to); break;
+      case 'mot_intrus': game = createMotIntrusGame(userId, to); break;
+      case 'devine_ce_que_je_pense': game = createDevineCeQueJePenseGame(userId, to); break;
+      case 'a_quel_point': game = createAQuelPointGame(userId, to); break;
+      case 'deux_verites': game = createDeuxVeritesGame(userId, to); break;
       default: return;
     }
     game.createdBy = userId;
@@ -316,8 +394,17 @@ function setupGameEvents(socket, io, getUserId) {
       game.currentRound++;
       emitGameState(io, game);
     } else if (game.type === 'quiz') {
-      // Démarre les questions si le pack IA est prêt, sinon attend sa génération
       quizAccept(game, io);
+    } else if (game.type === 'code_secret') {
+      codeSecretAccept(game, io);
+    } else if (game.type === 'mot_intrus') {
+      motIntrusAccept(game, io);
+    } else if (game.type === 'devine_ce_que_je_pense') {
+      devineAccept(game, io);
+    } else if (game.type === 'a_quel_point') {
+      aQuelPointAccept(game, io);
+    } else if (game.type === 'deux_verites') {
+      deuxVeritesAccept(game, io);
     } else {
       emitGameState(io, game);
     }
@@ -366,6 +453,27 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'answer' && data.answerIndex !== undefined) quizAnswer(game, userId, data.answerIndex, io);
           if (data.move === 'next') quizNext(game, userId, io);
           break;
+        case 'code_secret':
+          if (data.move === 'guess' && data.guess) makeGuess(game, userId, data.guess, io);
+          if (data.move === 'switch_roles') codeSecretSwitchRoles(game, io);
+          break;
+        case 'mot_intrus':
+          if (data.move === 'answer' && data.answerIndex !== undefined) motIntrusSubmit(game, userId, data.answerIndex, io);
+          break;
+        case 'devine_ce_que_je_pense':
+          if (data.move === 'question' && data.question) submitQuestion(game, userId, data.question, io);
+          if (data.move === 'answer' && data.answer) devineSubmitAnswer(game, userId, data.answer, io);
+          if (data.move === 'guess' && data.guess) guessItem(game, userId, data.guess, io);
+          if (data.move === 'switch_roles') devineSwitchRoles(game, io);
+          break;
+        case 'a_quel_point':
+          if (data.move === 'set_answer' && data.questionId !== undefined && data.answerIndex !== undefined) aqpSetAnswer(game, userId, data.questionId, data.answerIndex, io);
+          if (data.move === 'answer' && data.questionId !== undefined && data.answerIndex !== undefined) aqpAnswer(game, userId, data.questionId, data.answerIndex, io);
+          break;
+        case 'deux_verites':
+          if (data.move === 'statements' && data.statements && data.lieIndex !== undefined) submitStatements(game, userId, data.statements, data.lieIndex, io);
+          if (data.move === 'guess' && data.guessIndex !== undefined) submitGuess(game, userId, data.guessIndex, io);
+          break;
       }
     } catch (err) {
       // Never let one bad move crash the whole server
@@ -382,6 +490,11 @@ function setupGameEvents(socket, io, getUserId) {
       case 'rps': rpsRematch(game, io); break;
       case 'dice': diceRematch(game, io); break;
       case 'quiz': quizRematch(game, io); break;
+      case 'code_secret': codeSecretRematch(game, io); break;
+      case 'mot_intrus': motIntrusRematch(game, io); break;
+      case 'devine_ce_que_je_pense': devineRematch(game, io); break;
+      case 'a_quel_point': aQuelPointRematch(game, io); break;
+      case 'deux_verites': deuxVeritesRematch(game, io); break;
     }
   });
 
