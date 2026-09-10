@@ -57,27 +57,77 @@ async function getUsedQuestionsText() {
 
 // Vérifie si une question est en français (détection simple)
 function isFrenchQuestion(question) {
-  const text = (question.question + ' ' + question.answers.join(' ')).toLowerCase();
-  // Mots anglais courants qui indiquent une question en anglais
-  const englishWords = ['what', 'where', 'when', 'who', 'why', 'how', 'which', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
-  const englishCount = englishWords.filter(word => text.includes(word)).length;
-  // Si plus de 3 mots anglais communs, c'est probablement de l'anglais
-  return englishCount <= 3;
+  const questionText = question.question.toLowerCase();
+  const answersText = question.answers.join(' ').toLowerCase();
+
+  // Rejet immédiat si la question commence par un mot anglais interrogatif
+  const englishQuestionStarters = ['what', 'where', 'when', 'who', 'why', 'how', 'which', 'whose', 'whom'];
+  if (englishQuestionStarters.some(starter => questionText.startsWith(starter))) {
+    console.log(`REJECTED (starts with English question word): ${question.question}`);
+    return false;
+  }
+
+  // Rejet immédiat si les réponses contiennent trop de mots anglais
+  const englishWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those', 'a', 'an'];
+  const answerEnglishCount = englishWords.filter(word => answersText.includes(word)).length;
+  if (answerEnglishCount > 2) {
+    console.log(`REJECTED (too many English words in answers): ${question.question}`);
+    return false;
+  }
+
+  return true;
+}
+
+// Nettoie les questions en anglais de la base de données
+async function cleanupEnglishQuestions() {
+  try {
+    const allQuestions = await QuizQuestion.find({}).lean();
+    const englishQuestions = allQuestions.filter(q => !isFrenchQuestion({
+      question: q.text,
+      answers: q.answers
+    }));
+
+    if (englishQuestions.length > 0) {
+      console.log(`Found ${englishQuestions.length} English questions in database, deleting...`);
+      const idsToDelete = englishQuestions.map(q => q._id);
+      await QuizQuestion.deleteMany({ _id: { $in: idsToDelete } });
+      console.log(`Deleted ${englishQuestions.length} English questions from database`);
+    } else {
+      console.log('No English questions found in database');
+    }
+
+    return englishQuestions.length;
+  } catch (error) {
+    console.error('Error cleaning up English questions:', error.message);
+    return 0;
+  }
 }
 
 async function buildAIPrompt() {
   const usedQuestions = await getUsedQuestionsText();
   return `Tu es le générateur officiel du quiz de l'application.
 
-IMPORTANT : GÉNÈRE EXCLUSIVEMENT DES QUESTIONS ET RÉPONSES EN FRANÇAIS. AUCUNE QUESTION EN ANGLAIS OU AUTRE LANGUE.
+⚠️ RÈGLE ABSOLUE : GÉNÈRE EXCLUSIVEMENT DES QUESTIONS ET RÉPONSES EN FRANÇAIS.
+⚠️ INTERDICTION TOTALE DE GÉNÉRER DES QUESTIONS EN ANGLAIS.
+⚠️ SI TU GÈNÈRES UNE QUESTION EN ANGLAIS, LA RÉPONSE SERA REJETÉE.
 
 Génère 20 questions originales de culture générale en FRANÇAIS.
 
+Exemples de questions CORRECTES (en français) :
+- "Quelle est la capitale de la France ?"
+- "Qui a écrit Les Misérables ?"
+- "En quelle année a eu lieu la Révolution française ?"
+
+Exemples de questions INCORRECTES (en anglais - À ÉVITER) :
+- "What is the capital of France?"
+- "Who wrote Les Misérables?"
+- "What organ produces bile?"
+
 Contraintes OBLIGATOIRES :
-- TOUTES les questions doivent être en FRANÇAIS pur et correct.
-- TOUTES les réponses doivent être en FRANÇAIS pur et correct.
-- NE JAMAIS générer de questions en anglais.
-- NE JAMAIS utiliser de noms propres anglais (ex: "Dan Bell", "Hollywood") sauf si c'est un nom international connu.
+- TOUTES les questions doivent commencer par des mots français (Quelle, Qui, Quel, Quels, Quelles, Combien, En quelle, Dans quel, etc.)
+- TOUTES les réponses doivent être en français.
+- JAMAIS de mots anglais comme "What", "Where", "When", "Who", "Why", "How".
+- JAMAIS de noms propres anglais obscurs (ex: "Dan Bell").
 - Chaque question possède exactement 4 réponses.
 - Une seule réponse est correcte.
 - Les questions doivent être adaptées à des adultes.
@@ -145,38 +195,58 @@ function buildPack(rawList) {
   return pack;
 }
 
-async function generateQuizPack() {
+async function generateQuizPack(maxRetries = 3) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY absente du .env');
 
-  const prompt = await buildAIPrompt();
+  // Clean up English questions from database before generating
+  try {
+    await cleanupEnglishQuestions();
+  } catch (error) {
+    console.error('Error during cleanup:', error.message);
+  }
 
-  const res = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model: 'gpt-4o-mini',
-      temperature: 1.1,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: prompt },
-      ],
-    },
-    {
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      timeout: 45000,
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log(`AI generation attempt ${attempt}/${maxRetries}`);
+
+    const prompt = await buildAIPrompt();
+
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        temperature: 1.1,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: prompt },
+        ],
+      },
+      {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 45000,
+      }
+    );
+
+    const content = res.data?.choices?.[0]?.message?.content;
+    const cleaned = String(content || '').replace(/```(?:json)?/gi, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const rawList = Array.isArray(parsed) ? parsed : parsed?.questions;
+    const pack = buildPack(rawList);
+
+    if (!pack) {
+      console.log(`Attempt ${attempt}: Pack invalide ou trop de questions en anglais`);
+      if (attempt < maxRetries) continue;
+      throw new Error('Pack généré par l\'IA invalide après ' + maxRetries + ' tentatives');
     }
-  );
 
-  const content = res.data?.choices?.[0]?.message?.content;
-  const cleaned = String(content || '').replace(/```(?:json)?/gi, '').trim();
-  const parsed = JSON.parse(cleaned);
-  const rawList = Array.isArray(parsed) ? parsed : parsed?.questions;
-  const pack = buildPack(rawList);
-  if (!pack) throw new Error('Pack généré par l\'IA invalide');
-  
-  // Check for duplicates and save to database
-  const filteredPack = await filterAndSaveQuestions(pack, 'ai');
-  return filteredPack;
+    console.log(`Attempt ${attempt}: ${pack.length} questions valides en français`);
+
+    // Check for duplicates and save to database
+    const filteredPack = await filterAndSaveQuestions(pack, 'ai');
+    return filteredPack;
+  }
+
+  throw new Error('Échec de la génération après ' + maxRetries + ' tentatives');
 }
 
 // Banque locale de secours — utilisée uniquement si l'API OpenAI échoue,
@@ -404,7 +474,7 @@ async function fetchUnusedQuestions(count) {
     // Fetch questions with lowest usage count
     const questions = await QuizQuestion.find({ isDuplicate: false })
       .sort({ usedCount: 1, lastUsedAt: 1 })
-      .limit(count * 2) // Fetch double to filter out non-French questions
+      .limit(count * 3) // Fetch triple to filter out non-French questions
       .lean();
 
     // Filter out non-French questions
@@ -412,6 +482,12 @@ async function fetchUnusedQuestions(count) {
       question: q.text,
       answers: q.answers
     }));
+
+    // Log how many English questions were filtered
+    const englishCount = questions.length - frenchQuestions.length;
+    if (englishCount > 0) {
+      console.log(`Database: Filtered out ${englishCount} English questions`);
+    }
 
     // Take only the requested count
     const selectedQuestions = frenchQuestions.slice(0, count);
@@ -424,7 +500,7 @@ async function fetchUnusedQuestions(count) {
         { $inc: { usedCount: 1 }, $set: { lastUsedAt: new Date() } }
       );
     }
-    
+
     return selectedQuestions.map(q => ({
       id: q._id.toString(),
       question: q.text,
@@ -446,6 +522,13 @@ async function fetchUnusedQuestions(count) {
 const recentFallbackQuestions = [];
 
 async function fallbackPack() {
+  // Clean up English questions from database (one-time cleanup)
+  try {
+    await cleanupEnglishQuestions();
+  } catch (error) {
+    console.error('Error during cleanup:', error.message);
+  }
+
   // Try to fetch from database first
   try {
     const dbQuestions = await fetchUnusedQuestions(PACK_SIZE);

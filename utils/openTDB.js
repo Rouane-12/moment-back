@@ -54,19 +54,25 @@ async function fetchOpenTDBQuestions(amount = 20, difficulty = undefined, catego
     type: 'multiple', // Multiple choice only
     lang: 'fr' // Force French language
   };
-  
+
   if (difficulty) params.difficulty = difficulty;
   if (category) params.category = category;
   if (token) params.token = token;
-  
+
   try {
     const response = await axios.get(OPENTDB_BASE_URL, { params, timeout: 10000 });
-    
+
     if (response.data.response_code !== 0) {
       throw new Error(`OpenTDB API error: response_code ${response.data.response_code}`);
     }
-    
-    return response.data.results.map(q => mapOpenTDBQuestion(q));
+
+    // Map and filter out null values (English questions)
+    const mappedQuestions = response.data.results.map(q => mapOpenTDBQuestion(q));
+    const filteredQuestions = mappedQuestions.filter(q => q !== null);
+
+    console.log(`OpenTDB: ${filteredQuestions.length}/${mappedQuestions.length} questions after filtering English`);
+
+    return filteredQuestions;
   } catch (error) {
     console.error('Error fetching from OpenTDB:', error.message);
     throw error;
@@ -78,15 +84,27 @@ async function fetchOpenTDBQuestions(amount = 20, difficulty = undefined, catego
  */
 function mapOpenTDBQuestion(opentdbQuestion) {
   const { question, correct_answer, incorrect_answers, difficulty, category } = opentdbQuestion;
-  
+
+  // Decode first to check language
+  const decodedQuestion = decodeHTMLEntities(question);
+  const decodedAnswers = incorrect_answers.map(a => decodeHTMLEntities(a));
+  const decodedCorrect = decodeHTMLEntities(correct_answer);
+
+  // Check if question is in English - reject if it starts with English question words
+  const englishStarters = ['What', 'Where', 'When', 'Who', 'Why', 'How', 'Which', 'Whose'];
+  if (englishStarters.some(starter => decodedQuestion.startsWith(starter))) {
+    console.log(`OpenTDB rejected English question: ${decodedQuestion}`);
+    return null; // Return null to indicate this question should be skipped
+  }
+
   // Shuffle answers and track correct index
-  const allAnswers = [...incorrect_answers, correct_answer];
+  const allAnswers = [...decodedAnswers, decodedCorrect];
   const shuffled = shuffleArray(allAnswers);
-  const correctIndex = shuffled.indexOf(correct_answer);
-  
+  const correctIndex = shuffled.indexOf(decodedCorrect);
+
   return {
-    question: decodeHTMLEntities(question),
-    answers: shuffled.map(a => decodeHTMLEntities(a)),
+    question: decodedQuestion,
+    answers: shuffled,
     correctIndex,
     difficulty: DIFFICULTY_MAPPING[difficulty] || 'moyen',
     category: CATEGORY_MAPPING[opentdbQuestion.category] || 'autre',
