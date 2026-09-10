@@ -55,6 +55,16 @@ async function getUsedQuestionsText() {
   }
 }
 
+// Vérifie si une question est en français (détection simple)
+function isFrenchQuestion(question) {
+  const text = (question.question + ' ' + question.answers.join(' ')).toLowerCase();
+  // Mots anglais courants qui indiquent une question en anglais
+  const englishWords = ['what', 'where', 'when', 'who', 'why', 'how', 'which', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
+  const englishCount = englishWords.filter(word => text.includes(word)).length;
+  // Si plus de 3 mots anglais communs, c'est probablement de l'anglais
+  return englishCount <= 3;
+}
+
 async function buildAIPrompt() {
   const usedQuestions = await getUsedQuestionsText();
   return `Tu es le générateur officiel du quiz de l'application.
@@ -108,6 +118,13 @@ function buildPack(rawList) {
     if (q.answers.some(a => typeof a !== 'string' || !a.trim())) return null;
     const correctIndex = Number(q.correctIndex);
     if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex > 3) return null;
+    
+    // Vérifie que la question est en français
+    if (!isFrenchQuestion(q)) {
+      console.log(`Question en anglais détectée et rejetée: ${q.question}`);
+      continue; // Skip this question
+    }
+    
     const tier = TIERS[Math.floor(i / 5)];
     pack.push({
       id: `q${i + 1}`,
@@ -115,9 +132,16 @@ function buildPack(rawList) {
       answers: q.answers.map(a => a.trim()),
       correctIndex,
       difficulty: tier,
-      points: TIER_POINTS[tier],
+      points: TIER_POINTS[tier] || 200,
     });
   }
+  
+  // Si on n'a pas assez de questions après filtrage, retourne null
+  if (pack.length < PACK_SIZE) {
+    console.log(`Pas assez de questions en français après filtrage: ${pack.length}/${PACK_SIZE}`);
+    return null;
+  }
+  
   return pack;
 }
 
@@ -380,19 +404,28 @@ async function fetchUnusedQuestions(count) {
     // Fetch questions with lowest usage count
     const questions = await QuizQuestion.find({ isDuplicate: false })
       .sort({ usedCount: 1, lastUsedAt: 1 })
-      .limit(count)
+      .limit(count * 2) // Fetch double to filter out non-French questions
       .lean();
+
+    // Filter out non-French questions
+    const frenchQuestions = questions.filter(q => isFrenchQuestion({
+      question: q.text,
+      answers: q.answers
+    }));
+
+    // Take only the requested count
+    const selectedQuestions = frenchQuestions.slice(0, count);
 
     // Marque l'utilisation pour ne jamais resservir les mêmes questions
     // en boucle : elles repartent en fin de file (usedCount + lastUsedAt).
-    if (questions.length > 0) {
+    if (selectedQuestions.length > 0) {
       await QuizQuestion.updateMany(
-        { _id: { $in: questions.map(q => q._id) } },
+        { _id: { $in: selectedQuestions.map(q => q._id) } },
         { $inc: { usedCount: 1 }, $set: { lastUsedAt: new Date() } }
       );
     }
     
-    return questions.map(q => ({
+    return selectedQuestions.map(q => ({
       id: q._id.toString(),
       question: q.text,
       answers: q.answers,
