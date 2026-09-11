@@ -9,7 +9,7 @@ const { createMotIntrusMultiGame, answerRound: motIntrusMultiAnswer, motIntrusMu
 const { createCodeSecretGame, makeGuess, switchRoles: codeSecretSwitchRoles, codeSecretAccept, codeSecretRematch, emitCodeSecretState } = require('./codeSecret');
 const { createMotIntrusGame, submitAnswer: motIntrusSubmit, motIntrusAccept, motIntrusRematch, emitMotIntrusState } = require('./motIntrus');
 const { createDevineCeQueJePenseGame, submitQuestion, submitAnswer: devineSubmitAnswer, guessItem, switchRoles: devineSwitchRoles, devineAccept, devineRematch, emitDevineState } = require('./devineCeQueJePense');
-const { createAQuelPointGame, setAnswer: aqpSetAnswer, answerQuestion: aqpAnswer, aQuelPointAccept, aQuelPointRematch, emitAQuelPointState } = require('./aQuelPoint');
+const { createAQuelPointGame, settingAnswer: aqpSetting, guessAnswer: aqpGuess, aQuelPointAccept, aQuelPointRematch, clearAqpTimers } = require('./aQuelPoint');
 const { createDeuxVeritesGame, submitStatements, submitGuess, deuxVeritesAccept, deuxVeritesRematch, emitDeuxVeritesState } = require('./deuxVerites');
 const { createMemoireGame, memoireAccept, memoireInput, memoireUndo, memoireRematch, buildMemoireView, clearMemoireTimers } = require('./memoireFlash.js');
 const { createAvGame, avAccept, avVerdict, avSkip, avRematch, buildAvView, clearAVTimers } = require('./actionVerite.js');
@@ -619,8 +619,8 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'switch_roles') devineSwitchRoles(game, io);
           break;
         case 'a_quel_point':
-          if (data.move === 'set_answer' && data.questionId !== undefined && data.answerIndex !== undefined) aqpSetAnswer(game, userId, data.questionId, data.answerIndex, io);
-          if (data.move === 'answer' && data.questionId !== undefined && data.answerIndex !== undefined) aqpAnswer(game, userId, data.questionId, data.answerIndex, io);
+          if (data.move === 'set_answer' && data.questionId !== undefined && data.answerIndex !== undefined) aqpSetting(game, userId, data.questionId, data.answerIndex, io);
+          if (data.move === 'answer' && data.questionId !== undefined && data.answerIndex !== undefined) aqpGuess(game, userId, data.questionId, data.answerIndex, io);
           break;
         case 'deux_verites':
           if (data.move === 'statements' && data.statements && data.lieIndex !== undefined) submitStatements(game, userId, data.statements, data.lieIndex, io);

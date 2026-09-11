@@ -1,9 +1,15 @@
 /**
- * A quel point tu me connais ? - Compatibility quiz
- * Both players answer questions about each other
+ * À quel point tu me connais ? — Compatibility quiz
+ *
+ * Flux corrigé :
+ *   1. Player A remplit TOUTES ses données (ses vraies préférences)
+ *   2. Player B devine les réponses de A (une par une)
+ *   3. On montre les résultats pour les données de A
+ *   4. On inverse : Player B remplit ses données
+ *   5. Player A devine les réponses de B
+ *   6. Score final + pourcentage de compatibilité
  */
 
-const QUESTION_TIME_MS = 15000;
 const ROUNDS = 5;
 
 const QUESTIONS = [
@@ -44,158 +50,226 @@ function shuffleArray(arr) {
 
 function createAQuelPointGame(p1, p2) {
   const shuffledQuestions = shuffleArray(QUESTIONS).slice(0, ROUNDS);
-  
+
   return {
-    id: createGameId(),
-    type: 'a_quel_point',
+    id: createGameId(), type: 'a_quel_point',
     players: [p1, p2],
     state: 'waiting',
-    phase: 'setting',       // setting | answering | result | finished
+    // Phases : setting_p1 | guessing_p2 | result_p1 | setting_p2 | guessing_p1 | result_p2 | finished
+    phase: 'setting_p1',
     currentRound: 0,
     maxRounds: ROUNDS,
     questions: shuffledQuestions,
     currentQuestion: null,
-    answers: { [p1]: {}, [p2]: {} },  // { questionId: answerIndex }
-    settings: { [p1]: {}, [p2]: {} }, // { questionId: answerIndex } (what they set as their answer)
+    // Les VRAIES réponses de chaque joueur (cachées à l'adversaire)
+    trueAnswers: { [p1]: {}, [p2]: {} },
+    // Les devinettes de l'adversaire
+    guesses: { [p1]: {}, [p2]: {} },
     scores: { [p1]: 0, [p2]: 0 },
     compatibility: 0,
     winner: null,
     createdBy: p1,
-    deadline: null,
-    settingPlayer: null,
+    // Qui remplit ses données en ce moment
+    settingPlayer: p1,
+    // Qui devine en ce moment
+    guessingPlayer: null,
+    lastResult: null,
+    _roundTimer: null,
   };
 }
 
-function startRound(game, io) {
-  if (game.currentRound >= game.maxRounds) {
-    calculateResults(game, io);
-    return;
-  }
-  
-  game.currentRound++;
-  game.currentQuestion = game.questions[game.currentRound - 1];
-  game.phase = 'setting';
-  game.settingPlayer = game.players[0]; // First player sets their answer
-  
-  emitAQuelPointState(io, game);
+// ══════════════════════════════════════
+// DÉROULEMENT
+// ══════════════════════════════════════
+
+function startSettingPhase(game, io) {
+  // Le joueur courant remplit TOUTES ses données
+  game.currentRound = 0;
+  game.currentQuestion = null;
+  game.phase = game.settingPlayer === game.players[0] ? 'setting_p1' : 'setting_p2';
+  emitView(io, game);
 }
 
-function setAnswer(game, userId, questionId, answerIndex, io) {
-  if (game.state !== 'playing' || game.phase !== 'setting') return false;
+function startGuessingPhase(game, io) {
+  // L'adversaire commence à deviner
+  game.guessingPlayer = game.settingPlayer === game.players[0] ? game.players[1] : game.players[0];
+  game.currentRound = 0;
+  nextGuessQuestion(game, io);
+}
+
+function nextGuessQuestion(game, io) {
+  if (game.currentRound >= game.maxRounds) {
+    // Toutes les questions devinées → résultat
+    const resultPhase = game.guessingPlayer === game.players[1] ? 'result_p1' : 'result_p2';
+    game.phase = resultPhase;
+    emitView(io, game);
+
+    // Après 4 secondes, on passe à la phase suivante ou fin
+    game._roundTimer = setTimeout(() => {
+      game._roundTimer = null;
+      if (game.guessingPlayer === game.players[1]) {
+        // On vient de deviner les réponses de P1 → on passe à P2
+        game.settingPlayer = game.players[1];
+        startSettingPhase(game, io);
+      } else {
+        // On vient de deviner les réponses de P2 → fin
+        calculateResults(game, io);
+      }
+    }, 4000);
+    return;
+  }
+
+  game.currentRound++;
+  game.currentQuestion = game.questions[game.currentRound - 1];
+  const resultPhase = game.guessingPlayer === game.players[1] ? 'guessing_p2' : 'guessing_p1';
+  game.phase = resultPhase;
+  emitView(io, game);
+}
+
+// ══════════════════════════════════════
+// ACTIONS
+// ══════════════════════════════════════
+
+function settingAnswer(game, userId, questionId, answerIndex, io) {
+  if (game.state !== 'playing') return false;
   if (userId !== game.settingPlayer) return false;
   if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 3) return false;
-  
-  game.settings[userId][questionId] = answerIndex;
-  
-  // Switch to the other player
-  game.settingPlayer = game.settingPlayer === game.players[0] ? game.players[1] : game.players[0];
-  
-  // If both have set their answers, move to answering phase
-  if (Object.keys(game.settings[game.players[0]]).length === game.currentRound &&
-      Object.keys(game.settings[game.players[1]]).length === game.currentRound) {
-    game.phase = 'answering';
+
+  // Stocke la VRAIE réponse du joueur
+  game.trueAnswers[userId][questionId] = answerIndex;
+
+  // Vérifie si le joueur a répondu à TOUTES les questions
+  if (Object.keys(game.trueAnswers[userId]).length >= game.maxRounds) {
+    // Ce joueur a fini de remplir → phase de devinette
+    startGuessingPhase(game, io);
+  } else {
+    emitView(io, game);
   }
-  
-  emitAQuelPointState(io, game);
   return true;
 }
 
-function answerQuestion(game, userId, questionId, answerIndex, io) {
-  if (game.state !== 'playing' || game.phase !== 'answering') return false;
+function guessAnswer(game, userId, questionId, answerIndex, io) {
+  if (game.state !== 'playing') return false;
+  if (userId !== game.guessingPlayer) return false;
   if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 3) return false;
-  
-  game.answers[userId][questionId] = answerIndex;
-  
-  // Check if both have answered
-  if (Object.keys(game.answers[game.players[0]]).length === game.currentRound &&
-      Object.keys(game.answers[game.players[1]]).length === game.currentRound) {
-    // Show result for this round
-    game.phase = 'result';
-    game.lastResult = {
-      question: game.currentQuestion,
-      settings: {
-        [game.players[0]]: game.settings[game.players[0]][questionId],
-        [game.players[1]]: game.settings[game.players[1]][questionId],
-      },
-      answers: {
-        [game.players[0]]: game.answers[game.players[0]][questionId],
-        [game.players[1]]: game.answers[game.players[1]][questionId],
-      },
-    };
-    
-    // Check if answers match the settings
-    const p1Match = game.answers[game.players[0]][questionId] === game.settings[game.players[0]][questionId];
-    const p2Match = game.answers[game.players[1]][questionId] === game.settings[game.players[1]][questionId];
-    
-    if (p1Match) game.scores[game.players[0]]++;
-    if (p2Match) game.scores[game.players[1]]++;
-    
-    // Auto advance after showing result
-    setTimeout(() => startRound(game, io), 3000);
+
+  const settingUserId = game.settingPlayer;
+  game.guesses[userId][questionId] = answerIndex;
+
+  // Vérifie si la devinette est correcte
+  const correct = game.trueAnswers[settingUserId][questionId] === answerIndex;
+  if (correct) {
+    game.scores[userId]++;
   }
-  
-  emitAQuelPointState(io, game);
+
+  game.lastResult = {
+    question: game.currentQuestion,
+    correct,
+    theAnswer: game.currentQuestion.options[game.trueAnswers[settingUserId][questionId]],
+    myGuess: game.currentQuestion.options[answerIndex],
+  };
+
+  // Question suivante
+  nextGuessQuestion(game, io);
   return true;
 }
 
 function calculateResults(game, io) {
   game.state = 'finished';
   game.phase = 'finished';
-  
-  const totalPossible = game.maxRounds;
+
+  const totalPossible = game.maxRounds * 2;
   const p1Score = game.scores[game.players[0]];
   const p2Score = game.scores[game.players[1]];
-  
-  game.compatibility = Math.round(((p1Score + p2Score) / (totalPossible * 2)) * 100);
-  
+
+  game.compatibility = Math.round(((p1Score + p2Score) / totalPossible) * 100);
+
   if (p1Score > p2Score) game.winner = game.players[0];
   else if (p2Score > p1Score) game.winner = game.players[1];
   else game.winner = 'draw';
-  
-  emitAQuelPointState(io, game);
+
+  emitView(io, game);
 }
 
-function emitAQuelPointState(io, game) {
-  if (!game || !io) return;
-  
+// ══════════════════════════════════════
+// VIE DE LA PARTIE
+// ══════════════════════════════════════
+
+function aQuelPointAccept(game, io) {
+  if (game._started) return;
+  game._started = true;
+  game.state = 'playing';
+  startSettingPhase(game, io);
+}
+
+function aQuelPointRematch(game, io) {
+  clearAqpTimers(game);
+  const shuffledQuestions = shuffleArray(QUESTIONS).slice(0, ROUNDS);
+
+  game._started = true;
+  game.state = 'playing';
+  game.currentRound = 0;
+  game.questions = shuffledQuestions;
+  game.trueAnswers = { [game.players[0]]: {}, [game.players[1]]: {} };
+  game.guesses = { [game.players[0]]: {}, [game.players[1]]: {} };
+  game.scores = { [game.players[0]]: 0, [game.players[1]]: 0 };
+  game.compatibility = 0;
+  game.winner = null;
+  game.settingPlayer = game.players[0];
+  game.guessingPlayer = null;
+  game.lastResult = null;
+
+  startSettingPhase(game, io);
+}
+
+function clearAqpTimers(game) {
+  if (game._roundTimer) {
+    clearTimeout(game._roundTimer);
+    game._roundTimer = null;
+  }
+}
+
+// ══════════════════════════════════════
+// VUE PAR JOUEUR
+// ══════════════════════════════════════
+
+function emitView(io, game) {
+  if (!io || !game) return;
   for (const p of game.players) {
+    const isSetting = game.settingPlayer === p;
+    const isGuessing = game.guessingPlayer === p;
     const view = {
-      ...game,
-      currentQuestion: game.phase !== 'result' ? game.currentQuestion : game.lastResult?.question,
-      // Don't reveal the other player's settings during setting phase
-      settings: game.phase === 'setting' ? { [p]: game.settings[p] } : game.settings,
-      // Don't reveal answers during answering phase
-      answers: game.phase === 'result' ? game.answers : {},
+      id: game.id,
+      type: 'a_quel_point',
+      players: game.players,
+      scores: game.scores,
+      currentRound: game.currentRound,
+      maxRounds: game.maxRounds,
+      state: game.state,
+      phase: game.phase,
+      currentQuestion: game.currentQuestion,
+      // Le joueur qui remplit voit les questions, l'autre voit "En attente..."
+      canSet: isSetting && (game.phase === 'setting_p1' || game.phase === 'setting_p2'),
+      // Le joueur qui devine voit les questions, l'autre voit "En attente..."
+      canGuess: isGuessing && (game.phase === 'guessing_p1' || game.phase === 'guessing_p2'),
+      // Nombre de réponses déjà remplies
+      filledCount: Object.keys(game.trueAnswers[p] || {}).length,
+      // Nombre de devinettes déjà faites
+      guessedCount: Object.keys(game.guesses[p] || {}).length,
+      lastResult: game.lastResult,
+      compatibility: game.compatibility,
+      winner: game.winner,
+      createdBy: game.createdBy,
     };
     io.to(`user:${p}`).emit('game-state', { game: view });
   }
 }
 
-function aQuelPointAccept(game, io) {
-  game.state = 'playing';
-  startRound(game, io);
-}
-
-function aQuelPointRematch(game, io) {
-  const shuffledQuestions = shuffleArray(QUESTIONS).slice(0, ROUNDS);
-  
-  game.state = 'playing';
-  game.currentRound = 0;
-  game.questions = shuffledQuestions;
-  game.answers = { [game.players[0]]: {}, [game.players[1]]: {} };
-  game.settings = { [game.players[0]]: {}, [game.players[1]]: {} };
-  game.scores = { [game.players[0]]: 0, [game.players[1]]: 0 };
-  game.compatibility = 0;
-  game.winner = null;
-  
-  startRound(game, io);
-}
-
 module.exports = {
   createAQuelPointGame,
-  setAnswer,
-  answerQuestion,
+  settingAnswer,
+  guessAnswer,
   aQuelPointAccept,
   aQuelPointRematch,
-  emitAQuelPointState,
+  clearAqpTimers,
 };
