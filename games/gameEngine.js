@@ -11,6 +11,8 @@ const { createMotIntrusGame, submitAnswer: motIntrusSubmit, motIntrusAccept, mot
 const { createDevineCeQueJePenseGame, submitQuestion, submitAnswer: devineSubmitAnswer, guessItem, switchRoles: devineSwitchRoles, devineAccept, devineRematch, emitDevineState } = require('./devineCeQueJePense');
 const { createAQuelPointGame, setAnswer: aqpSetAnswer, answerQuestion: aqpAnswer, aQuelPointAccept, aQuelPointRematch, emitAQuelPointState } = require('./aQuelPoint');
 const { createDeuxVeritesGame, submitStatements, submitGuess, deuxVeritesAccept, deuxVeritesRematch, emitDeuxVeritesState } = require('./deuxVerites');
+const { createMemoireGame, memoireAccept, memoireInput, memoireUndo, memoireRematch, buildMemoireView, clearMemoireTimers } = require('./memoireFlash.js');
+const { createAvGame, avAccept, avVerdict, avSkip, avRematch, buildAvView, clearAVTimers } = require('./actionVerite.js');
 const { createInfiltratedGame, startGame: startInfiltrated, nightEliminate, nightInvestigate, nightProtect, vote, buildView: buildInfiltratedView, emitGameState: emitInfiltratedState, clearTimers: clearInfiltratedTimers } = require('./infiltrated');
 
 const activeGames = new Map();
@@ -25,6 +27,19 @@ function emitGameState(io, game) {
     // Le quiz envoie une vue par joueur (les bonnes réponses ne fuient jamais)
     for (const p of game.players) {
       io.to(`user:${p}`).emit('game-state', { game: buildQuizView(game, p) });
+    }
+    return;
+  }
+  if (game.type === 'memoire_flash') {
+    // Les séquences secrètes ne sont envoyées que dans la vue du joueur concerné
+    for (const p of game.players) {
+      io.to(`user:${p}`).emit('game-state', { game: buildMemoireView(game, p) });
+    }
+    return;
+  }
+  if (game.type === 'action_verite') {
+    for (const p of game.players) {
+      io.to(`user:${p}`).emit('game-state', { game: buildAvView(game, p) });
     }
     return;
   }
@@ -463,6 +478,8 @@ function setupGameEvents(socket, io, getUserId) {
       case 'devine_ce_que_je_pense': game = createDevineCeQueJePenseGame(userId, to); break;
       case 'a_quel_point': game = createAQuelPointGame(userId, to); break;
       case 'deux_verites': game = createDeuxVeritesGame(userId, to); break;
+      case 'memoire_flash': game = createMemoireGame(userId, to); break;
+      case 'action_verite': game = createAvGame(userId, to, io); break;
       default: return;
     }
     game.createdBy = userId;
@@ -472,6 +489,13 @@ function setupGameEvents(socket, io, getUserId) {
       // Vue par joueur : le pack contient les bonnes réponses côté serveur
       io.to(`user:${to}`).emit('game-invite', { game: buildQuizView(game, to), from: userId });
       io.to(`user:${userId}`).emit('game-invite', { game: buildQuizView(game, userId), from: userId });
+    } else if (game.type === 'memoire_flash') {
+      // Vue par joueur (les séquences secrètes ne partent jamais chez le client)
+      io.to(`user:${to}`).emit('game-invite', { game: buildMemoireView(game, to), from: userId });
+      io.to(`user:${userId}`).emit('game-invite', { game: buildMemoireView(game, userId), from: userId });
+    } else if (game.type === 'action_verite') {
+      io.to(`user:${to}`).emit('game-invite', { game: buildAvView(game, to), from: userId });
+      io.to(`user:${userId}`).emit('game-invite', { game: buildAvView(game, userId), from: userId });
     } else {
       io.to(`user:${to}`).emit('game-invite', { game, from: userId });
       io.to(`user:${userId}`).emit('game-invite', { game, from: userId });
@@ -489,6 +513,10 @@ function setupGameEvents(socket, io, getUserId) {
       for (const p of game.players) {
         io.to(`user:${p}`).emit('game-start', { game: buildQuizView(game, p) });
       }
+    } else if (game.type === 'memoire_flash') {
+      // émis après memoireAccept, quand la manche a déjà démarré
+    } else if (game.type === 'action_verite') {
+      // émis après avAccept
     } else {
       io.to(`user:${game.players[0]}`).emit('game-start', { game });
       io.to(`user:${game.players[1]}`).emit('game-start', { game });
@@ -511,6 +539,16 @@ function setupGameEvents(socket, io, getUserId) {
       aQuelPointAccept(game, io);
     } else if (game.type === 'deux_verites') {
       deuxVeritesAccept(game, io);
+    } else if (game.type === 'memoire_flash') {
+      memoireAccept(game, io);
+      for (const p of game.players) {
+        io.to(`user:${p}`).emit('game-start', { game: buildMemoireView(game, p) });
+      }
+    } else if (game.type === 'action_verite') {
+      avAccept(game, io);
+      for (const p of game.players) {
+        io.to(`user:${p}`).emit('game-start', { game: buildAvView(game, p) });
+      }
     } else {
       emitGameState(io, game);
     }
@@ -520,6 +558,9 @@ function setupGameEvents(socket, io, getUserId) {
     const game = activeGames.get(data.gameId);
     if (!game) return;
     clearQuizTimers(game);
+    if (game.type === 'memoire_flash') clearMemoireTimers(game);
+    if (game.type === 'action_verite') clearAVTimers(game);
+    if (game.type === 'infiltrated') clearInfiltratedTimers(game);
     game.state = 'finished';
     game.winner = 'declined';
     emitGameState(io, game);
@@ -530,6 +571,8 @@ function setupGameEvents(socket, io, getUserId) {
     const game = activeGames.get(data.gameId);
     if (game) {
       clearQuizTimers(game);
+      if (game.type === 'memoire_flash') clearMemoireTimers(game);
+      if (game.type === 'action_verite') clearAVTimers(game);
       if (game.type === 'infiltrated') {
         clearInfiltratedTimers(game);
       }
@@ -583,6 +626,14 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'statements' && data.statements && data.lieIndex !== undefined) submitStatements(game, userId, data.statements, data.lieIndex, io);
           if (data.move === 'guess' && data.guessIndex !== undefined) submitGuess(game, userId, data.guessIndex, io);
           break;
+        case 'memoire_flash':
+          if (data.move === 'input' && data.color) memoireInput(game, userId, data.color, io);
+          if (data.move === 'undo') memoireUndo(game, userId, io);
+          break;
+        case 'action_verite':
+          if (data.move === 'verdict' && data.accepted !== undefined) avVerdict(game, userId, !!data.accepted, io);
+          if (data.move === 'skip') avSkip(game, userId, io);
+          break;
         case 'mot_intrus_multi':
           if (data.move === 'answer' && data.answerIndex !== undefined) motIntrusMultiAnswer(game, userId, data.answerIndex, io);
           break;
@@ -615,6 +666,8 @@ function setupGameEvents(socket, io, getUserId) {
       case 'devine_ce_que_je_pense': devineRematch(game, io); break;
       case 'a_quel_point': aQuelPointRematch(game, io); break;
       case 'deux_verites': deuxVeritesRematch(game, io); break;
+      case 'memoire_flash': memoireRematch(game, io); break;
+      case 'action_verite': avRematch(game, io); break;
     }
   });
 
@@ -652,6 +705,8 @@ function setupGameEvents(socket, io, getUserId) {
       // Parties en cours : fin de partie propre + nettoyage des timers
       if (game.state === 'playing' || game.type === 'infiltrated') {
         clearQuizTimers(game);
+        if (game.type === 'memoire_flash') clearMemoireTimers(game);
+        if (game.type === 'action_verite') clearAVTimers(game);
         if (game.type === 'infiltrated') clearInfiltratedTimers(game);
         game.state = 'finished';
         game.winner = 'disconnect';

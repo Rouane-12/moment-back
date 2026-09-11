@@ -15,6 +15,13 @@ const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 5200;
 
+// Diagnostic : la clé OpenAI doit être visible dès le démarrage
+if (!process.env.OPENAI_API_KEY) {
+  console.warn('⚠️  OPENAI_API_KEY absente — quiz et Action ou Vérité utiliseront la banque de secours locale.');
+} else {
+  console.log('🔑 OPENAI_API_KEY chargée (définit ' + process.env.OPENAI_API_KEY.slice(0, 7) + '…)');
+}
+
 // CORS allowed origins
 const allowedOrigins = [
   process.env.FRONTEND_URL,
