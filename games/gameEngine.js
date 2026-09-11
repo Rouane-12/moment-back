@@ -623,7 +623,7 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'answer' && data.questionId !== undefined && data.answerIndex !== undefined) aqpGuess(game, userId, data.questionId, data.answerIndex, io);
           break;
         case 'deux_verites':
-          if (data.move === 'statements' && data.statements && data.lieIndex !== undefined) submitStatements(game, userId, data.statements, data.lieIndex, io);
+          if (data.move === 'statements' && data.statements && data.truthIndex !== undefined) submitStatements(game, userId, data.statements, data.truthIndex, io);
           if (data.move === 'guess' && data.guessIndex !== undefined) submitGuess(game, userId, data.guessIndex, io);
           break;
         case 'memoire_flash':

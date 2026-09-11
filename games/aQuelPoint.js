@@ -83,9 +83,9 @@ function createAQuelPointGame(p1, p2) {
 // ══════════════════════════════════════
 
 function startSettingPhase(game, io) {
-  // Le joueur courant remplit TOUTES ses données
-  game.currentRound = 0;
-  game.currentQuestion = null;
+  // Le joueur courant remplit TOUTES ses données, une par une
+  game.settingIndex = 0;
+  game.currentQuestion = game.questions[0];
   game.phase = game.settingPlayer === game.players[0] ? 'setting_p1' : 'setting_p2';
   emitView(io, game);
 }
@@ -138,11 +138,13 @@ function settingAnswer(game, userId, questionId, answerIndex, io) {
   // Stocke la VRAIE réponse du joueur
   game.trueAnswers[userId][questionId] = answerIndex;
 
-  // Vérifie si le joueur a répondu à TOUTES les questions
-  if (Object.keys(game.trueAnswers[userId]).length >= game.maxRounds) {
+  // Passe à la question suivante ou phase de devinette
+  game.settingIndex = (game.settingIndex || 0) + 1;
+  if (game.settingIndex >= game.maxRounds) {
     // Ce joueur a fini de remplir → phase de devinette
     startGuessingPhase(game, io);
   } else {
+    game.currentQuestion = game.questions[game.settingIndex];
     emitView(io, game);
   }
   return true;
@@ -248,6 +250,7 @@ function emitView(io, game) {
       state: game.state,
       phase: game.phase,
       currentQuestion: game.currentQuestion,
+      settingIndex: game.settingIndex || 0,
       // Le joueur qui remplit voit les questions, l'autre voit "En attente..."
       canSet: isSetting && (game.phase === 'setting_p1' || game.phase === 'setting_p2'),
       // Le joueur qui devine voit les questions, l'autre voit "En attente..."

@@ -22,7 +22,7 @@ function createDeuxVeritesGame(p1, p2) {
     maxRounds: ROUNDS,
     currentPlayer: p1,      // who is currently writing statements
     statements: {},         // { playerId: [statement1, statement2, statement3] }
-    lieIndex: {},           // { playerId: index of the lie }
+    truthIndex: {},         // { playerId: index of the TRUTH (1 truth, 2 lies) }
     guess: null,            // the guess from the other player
     scores: { [p1]: 0, [p2]: 0 },
     winner: null,
@@ -45,15 +45,15 @@ function startRound(game, io) {
   emitDeuxVeritesState(io, game);
 }
 
-function submitStatements(game, userId, statements, lieIndex, io) {
+function submitStatements(game, userId, statements, truthIndex, io) {
   if (game.state !== 'playing' || game.phase !== 'writing') return false;
   if (userId !== game.currentPlayer) return false;
   if (!Array.isArray(statements) || statements.length !== 3) return false;
   if (!statements.every(s => typeof s === 'string' && s.trim().length > 0)) return false;
-  if (!Number.isInteger(lieIndex) || lieIndex < 0 || lieIndex > 2) return false;
+  if (!Number.isInteger(truthIndex) || truthIndex < 0 || truthIndex > 2) return false;
   
   game.statements[userId] = statements.map(s => s.trim());
-  game.lieIndex[userId] = lieIndex;
+  game.truthIndex[userId] = truthIndex;
   
   // Switch to guessing phase
   game.phase = 'guessing';
@@ -71,7 +71,9 @@ function submitGuess(game, userId, guessIndex, io) {
   game.guess = { player: userId, guessIndex };
   
   // Check if correct
-  const correct = guessIndex === game.lieIndex[game.currentPlayer];
+  // Le joueur devine quel est le TRUC (la verite parmi les 2 mensonges)
+  // Donc correct = le joueur a choisi la VERITE
+  const correct = guessIndex === game.truthIndex[game.currentPlayer];
   
   if (correct) {
     game.scores[userId] += 100;
@@ -81,7 +83,7 @@ function submitGuess(game, userId, guessIndex, io) {
   
   game.lastResult = {
     statements: game.statements[game.currentPlayer],
-    lieIndex: game.lieIndex[game.currentPlayer],
+    truthIndex: game.truthIndex[game.currentPlayer],
     guess: guessIndex,
     correct,
     guesser: userId,
@@ -120,10 +122,10 @@ function emitDeuxVeritesState(io, game) {
     const isWriter = p === game.currentPlayer;
     const view = {
       ...game,
-      // Don't reveal which statement is the lie during writing/guessing
-      statements: game.phase === 'result' ? game.statements : {},
-      lieIndex: game.phase === 'result' ? game.lieIndex : {},
-      // Don't show the writer's statements to them during guessing (they already know)
+      // Affiche les affirmations pendant guessing ET result (pas pendant writing)
+      statements: (game.phase === 'guessing' || game.phase === 'result') ? game.statements : {},
+      truthIndex: game.phase === 'result' ? game.truthIndex : {},
+      // Le writer voit ses propres affirmations pendant writing
       currentStatements: isWriter ? game.statements[p] : undefined,
     };
     io.to(`user:${p}`).emit('game-state', { game: view });
@@ -140,7 +142,7 @@ function deuxVeritesRematch(game, io) {
   game.currentRound = 0;
   game.currentPlayer = game.players[0];
   game.statements = {};
-  game.lieIndex = {};
+  game.truthIndex = {};
   game.guess = null;
   game.scores = { [game.players[0]]: 0, [game.players[1]]: 0 };
   game.winner = null;
