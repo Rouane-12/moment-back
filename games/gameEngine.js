@@ -6,7 +6,7 @@
 const { createQuizGame, quizAccept, quizAnswer, quizNext, quizRematch, buildQuizView, clearQuizTimers } = require('./quiz');
 const { createBuzzerQuiz, addPlayer, removePlayer, onBuzz, submitAnswer: buzzerSubmitAnswer, startGame: buzzerStartGame, quizAccept: buzzerAccept, quizRematch: buzzerRematch, buildBuzzerView, emitBuzzerState } = require('./buzzerQuiz');
 const { createMotIntrusMultiGame, answerRound: motIntrusMultiAnswer, motIntrusMultiAccept, motIntrusMultiRematch, emitMotIntrusMultiState, buildView: buildMotIntrusMultiView } = require('./motIntrusMulti');
-const { createCodeSecretGame, makeGuess, switchRoles: codeSecretSwitchRoles, codeSecretAccept, codeSecretRematch, emitCodeSecretState } = require('./codeSecret');
+const { createCodeSecretGame, setCode, makeGuess, codeSecretAccept, codeSecretRematch, emitCodeSecretState } = require('./codeSecret');
 const { createMotIntrusGame, submitAnswer: motIntrusSubmit, motIntrusAccept, motIntrusRematch, emitMotIntrusState } = require('./motIntrus');
 const { createDevineCeQueJePenseGame, submitQuestion, submitAnswer: devineSubmitAnswer, guessItem, switchRoles: devineSwitchRoles, devineAccept, devineRematch, emitDevineState } = require('./devineCeQueJePense');
 const { createAQuelPointGame, settingAnswer: aqpSetting, guessAnswer: aqpGuess, aQuelPointAccept, aQuelPointRematch, clearAqpTimers } = require('./aQuelPoint');
@@ -606,8 +606,8 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'next') quizNext(game, userId, io);
           break;
         case 'code_secret':
+          if (data.move === 'set_code' && data.symbol) setCode(game, userId, data.symbol, io);
           if (data.move === 'guess' && data.guess) makeGuess(game, userId, data.guess, io);
-          if (data.move === 'switch_roles') codeSecretSwitchRoles(game, io);
           break;
         case 'mot_intrus':
           if (data.move === 'answer' && data.answerIndex !== undefined) motIntrusSubmit(game, userId, data.answerIndex, io);
