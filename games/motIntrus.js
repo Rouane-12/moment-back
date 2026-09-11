@@ -161,4 +161,6 @@ module.exports = {
   motIntrusAccept,
   motIntrusRematch,
   emitMotIntrusState,
+  ROUNDS_PER_GAME,
+  WORD_SETS,
 };

@@ -811,6 +811,7 @@ module.exports = {
   buildQuizView,
   emitQuizState,
   clearQuizTimers,
+  generateQuizPack,
   // Exposés pour les tests
   FALLBACK_BANK,
   TIERS,

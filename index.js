@@ -104,6 +104,11 @@ io.on('connection', (socket) => {
     }
   }
 
+  // Liste des utilisateurs en ligne (page Jeux)
+  socket.on('get-online-users', () => {
+    socket.emit('online-users', { userIds: [...onlineUsers.keys()] });
+  });
+
   // Join a conversation room
   socket.on('join', (conversationId) => {
     socket.join(`conv:${conversationId}`);

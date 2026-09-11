@@ -4,7 +4,8 @@
  */
 
 const { createQuizGame, quizAccept, quizAnswer, quizNext, quizRematch, buildQuizView, clearQuizTimers } = require('./quiz');
-const { createBuzzerQuiz, addPlayer, removePlayer, onBuzz, submitAnswer: buzzerSubmitAnswer, quizAccept: buzzerAccept, quizRematch: buzzerRematch, buildBuzzerView, emitBuzzerState } = require('./buzzerQuiz');
+const { createBuzzerQuiz, addPlayer, removePlayer, onBuzz, submitAnswer: buzzerSubmitAnswer, startGame: buzzerStartGame, quizAccept: buzzerAccept, quizRematch: buzzerRematch, buildBuzzerView, emitBuzzerState } = require('./buzzerQuiz');
+const { createMotIntrusMultiGame, answerRound: motIntrusMultiAnswer, motIntrusMultiAccept, motIntrusMultiRematch, emitMotIntrusMultiState, buildView: buildMotIntrusMultiView } = require('./motIntrusMulti');
 const { createCodeSecretGame, makeGuess, switchRoles: codeSecretSwitchRoles, codeSecretAccept, codeSecretRematch, emitCodeSecretState } = require('./codeSecret');
 const { createMotIntrusGame, submitAnswer: motIntrusSubmit, motIntrusAccept, motIntrusRematch, emitMotIntrusState } = require('./motIntrus');
 const { createDevineCeQueJePenseGame, submitQuestion, submitAnswer: devineSubmitAnswer, guessItem, switchRoles: devineSwitchRoles, devineAccept, devineRematch, emitDevineState } = require('./devineCeQueJePense');
@@ -27,8 +28,10 @@ function emitGameState(io, game) {
     }
     return;
   }
-  io.to(`user:${game.players[0]}`).emit('game-state', { game });
-  io.to(`user:${game.players[1]}`).emit('game-state', { game });
+  // Diffusion générique à TOUS les joueurs (duo ou multijoueur)
+  for (const p of game.players) {
+    io.to(`user:${p}`).emit('game-state', { game });
+  }
 }
 
 // ══════════════════════════════════════
@@ -280,25 +283,61 @@ function setupGameEvents(socket, io, getUserId) {
     const userId = getUserId(socket);
     if (!userId) return;
     const game = createBuzzerQuiz(userId, io);
+    // Ajout immédiat des joueurs sélectionnés par le créateur
+    const players = Array.isArray(data.players) ? data.players.filter((p) => p && p !== userId) : [];
+    for (const p of players) addPlayer(game, p, io);
     activeGames.set(game.id, game);
-    console.log(`🎯 Buzzer Quiz created by ${userId}`);
-    io.to(`user:${userId}`).emit('game-invite', { game: buildBuzzerView(game, userId), from: userId });
+    console.log(`🎯 Buzzer Quiz créé par ${userId} — ${game.players.length} joueurs`);
+    for (const p of game.players) {
+      io.to(`user:${p}`).emit('game-invite', { game: buildBuzzerView(game, p), from: userId });
+    }
   });
 
   // Create infiltrated game from games page
   socket.on('infiltrated-create', (data) => {
     const userId = getUserId(socket);
     if (!userId) return;
-    const { players } = data;
-    if (!players || players.length < 3) return; // Need at least 4 total (creator + 3)
+    const players = Array.isArray(data.players) ? data.players.filter((p) => p && p !== userId) : [];
 
     const game = createInfiltratedGame(userId, players);
+    if (!game) return; // moins de 4 joueurs au total : refusé par le moteur
     activeGames.set(game.id, game);
-    console.log(`🕵️ Infiltrated game created by ${userId} with ${players.length + 1} players`);
+    console.log(`🕵️ Infiltré créé par ${userId} — ${game.players.length} joueurs`);
 
-    // Send game to all players
     for (const playerId of game.players) {
       io.to(`user:${playerId}`).emit('game-invite', { game: buildInfiltratedView(game, playerId), from: userId });
+    }
+  });
+
+  // Add player to infiltrated lobby (créateur uniquement)
+  socket.on('infiltrated-add-player', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'infiltrated') return;
+    if (game.createdBy !== userId || game.state !== 'waiting') return;
+    if (game.players.length >= 12 || game.players.includes(data.playerId)) return;
+    game.players.push(data.playerId);
+    game.alive[data.playerId] = true;
+    for (const playerId of game.players) {
+      io.to(`user:${playerId}`).emit('game-invite', { game: buildInfiltratedView(game, playerId), from: game.createdBy });
+    }
+  });
+
+  // Remove player from infiltrated lobby (créateur uniquement)
+  socket.on('infiltrated-remove-player', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'infiltrated') return;
+    if (game.createdBy !== userId || game.state !== 'waiting') return;
+    const idx = game.players.indexOf(data.playerId);
+    if (idx === -1 || data.playerId === game.createdBy) return;
+    game.players.splice(idx, 1);
+    delete game.alive[data.playerId];
+    io.to(`user:${data.playerId}`).emit('game-state', { game: null, removed: true });
+    for (const playerId of game.players) {
+      io.to(`user:${playerId}`).emit('game-invite', { game: buildInfiltratedView(game, playerId), from: game.createdBy });
     }
   });
 
@@ -340,8 +379,21 @@ function setupGameEvents(socket, io, getUserId) {
     const game = activeGames.get(data.gameId);
     if (!game || game.type !== 'buzzer_quiz') return;
     if (game.createdBy !== userId) return;
-    game.state = 'playing';
-    buzzerAccept(game, io);
+    buzzerStartGame(game, io);
+  });
+
+  // Chat de discussion de jour (L'Infiltré)
+  socket.on('infiltrated-chat', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'infiltrated') return;
+    if (game.state !== 'day' || !game.alive[userId]) return;
+    const text = String(data.text || '').trim().slice(0, 300);
+    if (!text) return;
+    for (const p of game.players) {
+      io.to(`user:${p}`).emit('infiltrated-chat-message', { gameId: game.id, from: userId, text, at: Date.now() });
+    }
   });
 
   // Buzz!
@@ -369,6 +421,30 @@ function setupGameEvents(socket, io, getUserId) {
     const game = activeGames.get(data.gameId);
     if (!game || game.type !== 'buzzer_quiz') return;
     addPlayer(game, userId, io);
+  });
+
+  // Create Mot Intrus multiplayer from games page
+  socket.on('motintrusmulti-create', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const players = Array.isArray(data.players) ? data.players.filter((p) => p && p !== userId) : [];
+    const game = createMotIntrusMultiGame(userId, players);
+    if (!game) return;
+    activeGames.set(game.id, game);
+    console.log(`🔍 Mot Intrus Multi créé par ${userId} — ${game.players.length} joueurs`);
+    for (const p of game.players) {
+      io.to(`user:${p}`).emit('game-invite', { game: buildMotIntrusMultiView(game, p), from: userId });
+    }
+  });
+
+  // Start Mot Intrus multiplayer
+  socket.on('motintrusmulti-start', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'mot_intrus_multi') return;
+    if (game.createdBy !== userId) return;
+    motIntrusMultiAccept(game, io);
   });
 
   socket.on('game-invite', (data) => {
@@ -507,6 +583,9 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'statements' && data.statements && data.lieIndex !== undefined) submitStatements(game, userId, data.statements, data.lieIndex, io);
           if (data.move === 'guess' && data.guessIndex !== undefined) submitGuess(game, userId, data.guessIndex, io);
           break;
+        case 'mot_intrus_multi':
+          if (data.move === 'answer' && data.answerIndex !== undefined) motIntrusMultiAnswer(game, userId, data.answerIndex, io);
+          break;
         case 'infiltrated':
           if (data.move === 'night_eliminate' && data.targetId) nightEliminate(game, userId, data.targetId, io);
           if (data.move === 'night_investigate' && data.targetId) nightInvestigate(game, userId, data.targetId, io);
@@ -529,6 +608,8 @@ function setupGameEvents(socket, io, getUserId) {
       case 'rps': rpsRematch(game, io); break;
       case 'dice': diceRematch(game, io); break;
       case 'quiz': quizRematch(game, io); break;
+      case 'mot_intrus_multi': motIntrusMultiRematch(game, io); break;
+      case 'buzzer_quiz': buzzerRematch(game, io); break;
       case 'code_secret': codeSecretRematch(game, io); break;
       case 'mot_intrus': motIntrusRematch(game, io); break;
       case 'devine_ce_que_je_pense': devineRematch(game, io); break;
@@ -554,12 +635,29 @@ function setupGameEvents(socket, io, getUserId) {
     const userId = getUserId(socket);
     if (!userId) return;
     for (const [id, game] of activeGames) {
-      if (game.players.includes(userId) && game.state === 'playing') {
+      if (!game.players.includes(userId)) continue;
+      // Parties en attente : on retire simplement le joueur
+      if (game.state === 'waiting') {
+        if (game.type === 'buzzer_quiz') removePlayer(game, userId, io);
+        if (game.type === 'infiltrated') {
+          const idx = game.players.indexOf(userId);
+          if (idx !== -1 && userId !== game.createdBy) {
+            game.players.splice(idx, 1);
+            delete game.alive[userId];
+            for (const p of game.players) io.to(`user:${p}`).emit('game-invite', { game: buildInfiltratedView(game, p), from: game.createdBy });
+          }
+        }
+        continue;
+      }
+      // Parties en cours : fin de partie propre + nettoyage des timers
+      if (game.state === 'playing' || game.type === 'infiltrated') {
         clearQuizTimers(game);
+        if (game.type === 'infiltrated') clearInfiltratedTimers(game);
         game.state = 'finished';
         game.winner = 'disconnect';
-        const other = game.players.find(p => p !== userId);
-        if (other) io.to(`user:${other}`).emit('game-state', { game });
+        for (const p of game.players) {
+          if (p !== userId) io.to(`user:${p}`).emit('game-state', { game });
+        }
         activeGames.delete(id);
       }
     }

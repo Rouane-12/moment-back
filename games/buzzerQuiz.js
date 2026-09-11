@@ -16,7 +16,7 @@ const BUZZER_TIME_MS = 20000;      // 20s pour buzzer
 const ANSWER_TIME_MS = 10000;      // 10s pour répondre après avoir buzzer
 const FEEDBACK_TIME_MS = 4000;     // 4s d'affichage du résultat
 const MAX_PLAYERS = 5;
-const MIN_PLAYERS = 3;
+const MIN_PLAYERS = 2;
 
 function createGameId() {
   return 'buz_' + Math.random().toString(36).substring(2, 10);
@@ -149,16 +149,17 @@ function removePlayer(game, userId, io) {
 // ══════════════════════════════════════
 
 function startGame(game, io) {
+  if (game.state !== 'waiting') return false;
   if (game.players.length < MIN_PLAYERS) return false;
+
+  game.state = 'playing';
+  game.questionIndex = 0;
   if (game.quizStatus !== 'ready') {
-    // Attendre que le pack soit prêt
-    game.state = 'playing';
+    // Attendre que le pack soit prêt — onPackReady lancera la 1re question
     emitBuzzerState(io, game);
     return true;
   }
 
-  game.state = 'playing';
-  game.questionIndex = 0;
   startQuestion(game, io);
   return true;
 }
