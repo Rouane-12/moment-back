@@ -1,38 +1,61 @@
 /**
  * À quel point tu me connais ? — Compatibility quiz
  *
- * Flux corrigé :
+ * Flux :
  *   1. Player A remplit TOUTES ses données (ses vraies préférences)
  *   2. Player B devine les réponses de A (une par une)
  *   3. On montre les résultats pour les données de A
  *   4. On inverse : Player B remplit ses données
  *   5. Player A devine les réponses de B
  *   6. Score final + pourcentage de compatibilité
+ *
+ * La banque contient 40 questions variées ; chaque partie en tire 20
+ * AU HASARD, donc deux parties ne posent jamais exactement les mêmes.
  */
 
-const ROUNDS = 5;
+const QUESTIONS_PER_GAME = 20;
 
 const QUESTIONS = [
-  { id: 1, text: "Quelle est ma nourriture preferee ?", options: ["Pizza", "Sushi", "Poulet", "Pates"] },
-  { id: 2, text: "Quel pays voudrais-je visiter ?", options: ["Japon", "Etats-Unis", "Australie", "Bresil"] },
-  { id: 3, text: "Quelle est ma plus grande peur ?", options: ["Araignees", "Hauteur", "Obscurite", "Eau"] },
-  { id: 4, text: "Quel est mon film prefere ?", options: ["Inception", "Intouchables", "Le Loup de Wall Street", "Interstellar"] },
-  { id: 5, text: "Quelle est ma saison preferee ?", options: ["Printemps", "Ete", "Automne", "Hiver"] },
-  { id: 6, text: "Quel est mon sport prefere ?", options: ["Football", "Basketball", "Tennis", "Natation"] },
-  { id: 7, text: "Quelle est ma couleur preferee ?", options: ["Bleu", "Rouge", "Vert", "Noir"] },
-  { id: 8, text: "Quel est mon animal prefere ?", options: ["Chien", "Chat", "Lion", "Dauphin"] },
-  { id: 9, text: "Quel est mon metier de reve ?", options: ["Medecin", "Artiste", "Voyageur", "Entrepreneur"] },
-  { id: 10, text: "Quelle est ma boisson preferee ?", options: ["Cafe", "The", "Jus", "Eau"] },
-  { id: 11, text: "Quel est mon style de musique ?", options: ["Pop", "Rap", "Rock", "R&B"] },
-  { id: 12, text: "Quel est mon reseau social prefere ?", options: ["Instagram", "TikTok", "Twitter", "YouTube"] },
-  { id: 13, text: "Quelle est ma saison preferee pour voyager ?", options: ["Printemps", "Ete", "Automne", "Hiver"] },
-  { id: 14, text: "Quel est mon plat prefere au petit-dejeuner ?", options: ["Cereales", "Oeufs", "Pain", "Fruits"] },
-  { id: 15, text: "Quel est mon type de film prefere ?", options: ["Action", "Comedie", "Drame", "Horreur"] },
-  { id: 16, text: "Quelle est ma destination de reve ?", options: ["Maldives", "New York", "Tokyo", "Paris"] },
-  { id: 17, text: "Quel est mon hobby prefere ?", options: ["Lire", "Voyager", "Jouer", "Cuisiner"] },
-  { id: 18, text: "Quelle est ma saison preferee pour le sport ?", options: ["Printemps", "Ete", "Automne", "Hiver"] },
-  { id: 19, text: "Quel est mon style de vetements ?", options: ["Casual", "Sport", "Elegant", "Street"] },
-  { id: 20, text: "Quelle est ma facon de me detendre ?", options: ["Lire", "Ecouter de la musique", "Marcher", "Regarder des series"] },
+  { id: 1, text: "Quelle est ma saison preferee ?", options: ["Printemps", "Ete", "Automne", "Hiver"] },
+  { id: 2, text: "Quel est mon moment prefere de la journee ?", options: ["Le matin", "L'apres-midi", "Le soir", "La nuit"] },
+  { id: 3, text: "Comment je recharge mes batteries ?", options: ["En voyant des amis", "En restant seul", "En dormant", "En bougeant"] },
+  { id: 4, text: "Quel est mon plus grand talent cache ?", options: ["Chanter", "Cuisiner", "Ecouter les autres", "Bricoler"] },
+  { id: 5, text: "Quel est mon pire defaut ?", options: ["Tetue", "Distrait", "Impatient", "Rancunier"] },
+  { id: 6, text: "Comment je reagis quand je suis en colere ?", options: ["Je me tais", "J'argumente", "Je plaisante", "Je m'isole"] },
+  { id: 7, text: "Quel est mon plat prefere ?", options: ["Un plat de chez moi", "Une pizza", "Des pates", "Un plat epice"] },
+  { id: 8, text: "Quelle est ma boisson du quotidien ?", options: ["Cafe", "The", "Jus", "Eau"] },
+  { id: 9, text: "Quelle est ma plus grande peur ?", options: ["Le vide", "L'eau", "Les araignees", "Le noir"] },
+  { id: 10, text: "Quel super-pouvoir je choisirais ?", options: ["Voler", "Me teleporter", "Lire les pensees", "Etre invisible"] },
+  { id: 11, text: "Quel pays je reves de visiter ?", options: ["Le Japon", "Le Bresil", "L'Italie", "L'Egypte"] },
+  { id: 12, text: "Ma facon de voyager, c'est plutot...", options: ["Sac a dos", "Hotel confortable", "Road trip", "Au hasard"] },
+  { id: 13, text: "Quel est mon animal prefere ?", options: ["Le chat", "Le chien", "Le lion", "Le dauphin"] },
+  { id: 14, text: "Quel moyen de transport je prefere ?", options: ["La voiture", "Le train", "L'avion", "Le velo"] },
+  { id: 15, text: "Quelle couleur je porterais tout le temps ?", options: ["Le noir", "Le blanc", "Le bleu", "Une couleur vive"] },
+  { id: 16, text: "Comment je choisis mes vetements ?", options: ["Confort avant tout", "Toujours classe", "Streetwear", "Minimaliste"] },
+  { id: 17, text: "Quel est mon genre de film prefere ?", options: ["Action", "Comedie", "Thriller", "Science-fiction"] },
+  { id: 18, text: "Quelle musique me fait danser ?", options: ["Afrobeats", "Pop", "Rap", "Rock"] },
+  { id: 19, text: "Quel est mon sport prefere ?", options: ["Football", "Basket", "Tennis", "Natation"] },
+  { id: 20, text: "Un match, je prefere le regarder...", options: ["A la tele", "Au stade", "Entre amis", "Peu m'importe"] },
+  { id: 21, text: "Quelle est ma plus grande qualite ?", options: ["La patience", "La generosite", "L'humour", "La franchise"] },
+  { id: 22, text: "Combien d'amis proches il me faut ?", options: ["Un seul", "Trois ou quatre", "Beaucoup", "Peu importe"] },
+  { id: 23, text: "Quel cadeau me ferait le plus plaisir ?", options: ["Un voyage", "Un objet utile", "Un livre", "Du temps ensemble"] },
+  { id: 24, text: "Comment je prefere communiquer ?", options: ["Messages", "Appels", "En personne", "Notes vocales"] },
+  { id: 25, text: "Quelle est ma plus grande fierte ?", options: ["Ma famille", "Mes etudes", "Mes amis", "Mon travail"] },
+  { id: 26, text: "Qu'est-ce qui m'enerve le plus ?", options: ["Le mensonge", "La lenteur", "Le bruit", "L'impolitesse"] },
+  { id: 27, text: "Sur quoi je depense sans compter ?", options: ["La nourriture", "Les sorties", "Les vetements", "Les gadgets"] },
+  { id: 28, text: "Quel est mon plus grand reve ?", options: ["Voyager partout", "Fonder une famille", "Reussir mon projet", "Vivre pres de la mer"] },
+  { id: 29, text: "Comment je gere mon argent ?", options: ["Je depense vite", "J'epargne tout", "Je planifie", "Je ne regarde jamais"] },
+  { id: 30, text: "Quel metier j'aurais aime faire ?", options: ["Medecin", "Artiste", "Journaliste", "Pilote"] },
+  { id: 31, text: "Je suis plutot...", options: ["Optimiste", "Realiste", "Reveur", "Pragmatique"] },
+  { id: 32, text: "Quand je suis triste, je...", options: ["Parle a quelqu'un", "Ecoute de la musique", "Pleure", "Fais semblant que ca va"] },
+  { id: 33, text: "Quelle est mon habitude du soir ?", options: ["Regarder une serie", "Lire", "Travailler tard", "Scroller mon telephone"] },
+  { id: 34, text: "Je ne pourrais pas vivre sans...", options: ["Mon telephone", "Ma musique", "Mes amis", "Mon sport"] },
+  { id: 35, text: "Mon plus beau souvenir d'enfance ?", options: ["Les vacances", "Les fetes de famille", "Les jeux dehors", "Un cadeau precis"] },
+  { id: 36, text: "Ce qui me fait rire a coup sur ?", options: ["Les blagues nulles", "Les videos d'animaux", "Les situations genantes", "Mes amis"] },
+  { id: 37, text: "Quel compliment me touche le plus ?", options: ["Sur mon intelligence", "Sur mon humour", "Sur mon coeur", "Sur mon style"] },
+  { id: 38, text: "Comment je prends une decision difficile ?", options: ["Je pese le pour et le contre", "Je demande conseil", "J'ecoute mon instinct", "Je prends du temps"] },
+  { id: 39, text: "Si on me donnait une semaine libre, je...", options: ["Partirais loin", "Dormirais enfin", "Verrais tout le monde", "Apprendrais quelque chose"] },
+  { id: 40, text: "Le premier truc que je remarque chez quelqu'un ?", options: ["Le sourire", "Les yeux", "L'allure", "La voix"] },
 ];
 
 function createGameId() {
@@ -48,8 +71,13 @@ function shuffleArray(arr) {
   return shuffled;
 }
 
+/** Tire 20 questions au hasard dans la banque (jamais deux fois les mêmes). */
+function pickQuestions() {
+  return shuffleArray(QUESTIONS).slice(0, QUESTIONS_PER_GAME);
+}
+
 function createAQuelPointGame(p1, p2) {
-  const shuffledQuestions = shuffleArray(QUESTIONS).slice(0, ROUNDS);
+  const shuffledQuestions = pickQuestions();
 
   return {
     id: createGameId(), type: 'a_quel_point',
@@ -58,7 +86,7 @@ function createAQuelPointGame(p1, p2) {
     // Phases : setting_p1 | guessing_p2 | result_p1 | setting_p2 | guessing_p1 | result_p2 | finished
     phase: 'setting_p1',
     currentRound: 0,
-    maxRounds: ROUNDS,
+    maxRounds: shuffledQuestions.length,
     questions: shuffledQuestions,
     currentQuestion: null,
     // Les VRAIES réponses de chaque joueur (cachées à l'adversaire)
@@ -184,7 +212,7 @@ function calculateResults(game, io) {
   const p1Score = game.scores[game.players[0]];
   const p2Score = game.scores[game.players[1]];
 
-  game.compatibility = Math.round(((p1Score + p2Score) / totalPossible) * 100);
+  game.compatibility = totalPossible ? Math.round(((p1Score + p2Score) / totalPossible) * 100) : 0;
 
   if (p1Score > p2Score) game.winner = game.players[0];
   else if (p2Score > p1Score) game.winner = game.players[1];
@@ -206,11 +234,12 @@ function aQuelPointAccept(game, io) {
 
 function aQuelPointRematch(game, io) {
   clearAqpTimers(game);
-  const shuffledQuestions = shuffleArray(QUESTIONS).slice(0, ROUNDS);
+  const shuffledQuestions = pickQuestions();
 
   game._started = true;
   game.state = 'playing';
   game.currentRound = 0;
+  game.maxRounds = shuffledQuestions.length;
   game.questions = shuffledQuestions;
   game.trueAnswers = { [game.players[0]]: {}, [game.players[1]]: {} };
   game.guesses = { [game.players[0]]: {}, [game.players[1]]: {} };
@@ -236,11 +265,11 @@ function clearAqpTimers(game) {
 // ══════════════════════════════════════
 
 function compatibilityMessage(pct) {
-  if (pct >= 90) return "Impressionnant ! Vous vous connaissez par cœur.";
-  if (pct >= 70) return "Très bon score — vous êtes vraiment proches.";
-  if (pct >= 50) return "Pas mal ! Il vous reste quelques choses à découvrir.";
-  if (pct >= 30) return "Vous ne vous connaissez pas assez… il faut passer plus de temps ensemble !";
-  return "Aïe… vous êtes pratiquement des inconnus l'un pour l'autre !";
+  if (pct >= 90) return "Impressionnant ! Vous vous connaissez par coeur.";
+  if (pct >= 70) return "Tres bon score — vous etes vraiment proches.";
+  if (pct >= 50) return "Pas mal ! Il vous reste quelques choses a decouvrir.";
+  if (pct >= 30) return "Vous ne vous connaissez pas assez... il faut passer plus de temps ensemble !";
+  return "Aie... vous etes pratiquement des inconnus l'un pour l'autre !";
 }
 
 function emitView(io, game) {
@@ -287,4 +316,6 @@ module.exports = {
   aQuelPointAccept,
   aQuelPointRematch,
   clearAqpTimers,
+  QUESTIONS,
+  QUESTIONS_PER_GAME,
 };

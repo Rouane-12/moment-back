@@ -2,19 +2,21 @@
  * Le Code Secret — style Mastermind (duel 1v1)
  *
  * Déroulement :
- *   1. Le créateur (celui qui a lancé la partie) compose un code de 4 couleurs.
+ *   1. Le créateur (celui qui a lancé la partie) compose un code de 4 OBJETS.
  *   2. L'adversaire a 6 tentatives pour le deviner.
- *      Vert  = bonne couleur, bonne position
- *      Orange = bonne couleur, mauvaise position
+ *      Chaque objet proposé est affiché :
+ *        - entouré de VERT  = bon objet, bonne position
+ *        - entouré d'ORANGE = bon objet, mauvaise position
+ *        - sans contour     = objet absent du code
  *   3. On inverse les rôles : le devineur compose à son tour son code,
  *      et l'ancien créateur tente de le deviner.
  *   4. Celui qui casse le code en le moins de tentatives gagne.
  *
- * Les couleurs sont des clés ('red', 'green'…) rendues côté client par de
- * vraies pastilles de couleur — jamais d'emoji.
+ * Ce sont des clés d'objets ('apple', 'star'…) rendues côté client par de
+ * vraies icônes (Lucide), jamais par des emojis ni par des pastilles de couleur.
  */
 
-const COLORS = ['red', 'green', 'blue', 'yellow', 'purple', 'orange'];
+const SYMBOLS = ['apple', 'star', 'heart', 'rocket', 'key', 'ghost'];
 const CODE_LENGTH = 4;
 const MAX_ATTEMPTS = 6;
 
@@ -24,7 +26,7 @@ function createGameId() {
 
 /**
  * Compare une proposition au code secret.
- * Retourne un tableau indexé par POSITION : [{ color, status }]
+ * Retourne un tableau indexé par POSITION : [{ symbol, status }]
  * status ∈ 'correct' | 'wrong_position' | 'absent'
  */
 function evaluateGuess(code, guess) {
@@ -32,24 +34,24 @@ function evaluateGuess(code, guess) {
   const usedGuess = new Array(CODE_LENGTH).fill(false);
   const result = new Array(CODE_LENGTH).fill(null);
 
-  // 1. Bonnes couleurs bien placées
+  // 1. Bons objets bien placés
   for (let i = 0; i < CODE_LENGTH; i++) {
     if (guess[i] === code[i]) {
-      result[i] = { color: guess[i], status: 'correct' };
+      result[i] = { symbol: guess[i], status: 'correct' };
       usedCode[i] = true;
       usedGuess[i] = true;
     }
   }
 
-  // 2. Bonnes couleurs mal placées (chaque pion du code ne sert qu'une fois)
+  // 2. Bons objets mal placés (chaque pion du code ne sert qu'une fois)
   for (let i = 0; i < CODE_LENGTH; i++) {
     if (usedGuess[i]) continue;
     const idx = code.findIndex((c, j) => !usedCode[j] && c === guess[i]);
     if (idx !== -1) {
-      result[i] = { color: guess[i], status: 'wrong_position' };
+      result[i] = { symbol: guess[i], status: 'wrong_position' };
       usedCode[idx] = true;
     } else {
-      result[i] = { color: guess[i], status: 'absent' };
+      result[i] = { symbol: guess[i], status: 'absent' };
     }
   }
 
@@ -96,7 +98,7 @@ function setCode(game, userId, symbol, io, action = 'add') {
     return true;
   }
 
-  if (!COLORS.includes(symbol)) return false;
+  if (!SYMBOLS.includes(symbol)) return false;
   if (game._codeBuilding.length >= CODE_LENGTH) return false;
   game._codeBuilding.push(symbol);
 
@@ -118,7 +120,7 @@ function makeGuess(game, userId, guess, io) {
   if (game.phase !== 'guessing') return false;
   if (userId !== game.currentGuesser) return false;
   if (!Array.isArray(guess) || guess.length !== CODE_LENGTH) return false;
-  if (!guess.every((s) => COLORS.includes(s))) return false;
+  if (!guess.every((s) => SYMBOLS.includes(s))) return false;
 
   const list = game.attemptsBy[userId];
   const key = guess.join('-');
@@ -233,7 +235,7 @@ function buildView(game, viewer) {
     codeCreator: game.codeCreator,
     currentGuesser: game.currentGuesser,
     myRole,
-    colors: COLORS,
+    symbols: SYMBOLS,
     codeLength: CODE_LENGTH,
     maxAttempts: MAX_ATTEMPTS,
     // Seul le créateur voit son code en construction (jamais le code verrouillé)
@@ -262,7 +264,7 @@ module.exports = {
   codeSecretRematch,
   emitCodeSecretState,
   buildView,
-  COLORS,
+  SYMBOLS,
   CODE_LENGTH,
   MAX_ATTEMPTS,
 };

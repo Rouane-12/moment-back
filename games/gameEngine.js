@@ -13,6 +13,8 @@ const { createAQuelPointGame, settingAnswer: aqpSetting, guessAnswer: aqpGuess, 
 const { createDeuxVeritesGame, submitStatements, submitGuess, deuxVeritesAccept, deuxVeritesRematch, emitDeuxVeritesState } = require('./deuxVerites');
 const { createMemoireGame, memoireAccept, memoireInput, memoireUndo, memoireRematch, buildMemoireView, clearMemoireTimers } = require('./memoireFlash.js');
 const { createAvGame, avAccept, avChoose, avPrompt, avRespond, avRematch, buildAvView, clearAVTimers } = require('./actionVerite.js');
+const { createDiceDuelGame, diceDuelAccept, diceDuelMove, diceDuelRematch } = require('./diceDuel.js');
+const { createDiceSpiraleGame, diceSpiraleAccept, diceSpiraleRoll, diceSpiraleRematch } = require('./diceSpirale.js');
 const { createInfiltratedGame, startGame: startInfiltrated, nightEliminate, nightInvestigate, nightProtect, vote, buildView: buildInfiltratedView, emitGameState: emitInfiltratedState, clearTimers: clearInfiltratedTimers } = require('./infiltrated');
 
 const activeGames = new Map();
@@ -478,6 +480,30 @@ function setupGameEvents(socket, io, getUserId) {
     }
   });
 
+  // Création de la Course en Spirale depuis la page Jeux
+  socket.on('dicespirale-create', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const players = Array.isArray(data.players) ? data.players.filter((p) => p && p !== userId) : [];
+    const game = createDiceSpiraleGame(userId, players);
+    if (!game) return; // il faut au moins 2 joueurs
+    activeGames.set(game.id, game);
+    console.log(`🎲 Course en Spirale créée par ${userId} — ${game.players.length} joueurs`);
+    for (const p of game.players) {
+      io.to(`user:${p}`).emit('game-invite', { game, from: userId });
+    }
+  });
+
+  // Lancement de la Course en Spirale (créateur uniquement)
+  socket.on('dicespirale-start', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'dice_spirale') return;
+    if (game.createdBy !== userId) return;
+    diceSpiraleAccept(game, io);
+  });
+
   // Lancement du quiz multijoueur (créateur uniquement)
   socket.on('quiz-start', (data) => {
     const userId = getUserId(socket);
@@ -508,6 +534,7 @@ function setupGameEvents(socket, io, getUserId) {
       case 'deux_verites': game = createDeuxVeritesGame(userId, to); break;
       case 'memoire_flash': game = createMemoireGame(userId, to); break;
       case 'action_verite': game = createAvGame(userId, to, io); break;
+      case 'dice_duel': game = createDiceDuelGame(userId, to); break;
       default: return;
     }
     game.createdBy = userId;
@@ -577,6 +604,8 @@ function setupGameEvents(socket, io, getUserId) {
       for (const p of game.players) {
         io.to(`user:${p}`).emit('game-start', { game: buildAvView(game, p) });
       }
+    } else if (game.type === 'dice_duel') {
+      diceDuelAccept(game, io);
     } else {
       emitGameState(io, game);
     }
@@ -686,6 +715,12 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'prompt' && data.text !== undefined) avPrompt(game, userId, data.text, io);
           if (data.move === 'respond') avRespond(game, userId, data.done !== undefined ? data.done : data.text, io);
           break;
+        case 'dice_duel':
+          if (data.move === 'attack' || data.move === 'defend' || data.move === 'reroll') diceDuelMove(game, userId, data.move, io);
+          break;
+        case 'dice_spirale':
+          if (data.move === 'roll') diceSpiraleRoll(game, userId, io);
+          break;
         case 'mot_intrus_multi':
           if (data.move === 'answer' && data.answerIndex !== undefined) motIntrusMultiAnswer(game, userId, data.answerIndex, io);
           break;
@@ -720,6 +755,8 @@ function setupGameEvents(socket, io, getUserId) {
       case 'deux_verites': deuxVeritesRematch(game, io); break;
       case 'memoire_flash': memoireRematch(game, io); break;
       case 'action_verite': avRematch(game, io); break;
+      case 'dice_duel': diceDuelRematch(game, io); break;
+      case 'dice_spirale': diceSpiraleRematch(game, io); break;
     }
   });
 
