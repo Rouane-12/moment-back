@@ -12,7 +12,7 @@ const { createDevineCeQueJePenseGame, submitQuestion, submitAnswer: devineSubmit
 const { createAQuelPointGame, settingAnswer: aqpSetting, guessAnswer: aqpGuess, aQuelPointAccept, aQuelPointRematch, clearAqpTimers } = require('./aQuelPoint');
 const { createDeuxVeritesGame, submitStatements, submitGuess, deuxVeritesAccept, deuxVeritesRematch, emitDeuxVeritesState } = require('./deuxVerites');
 const { createMemoireGame, memoireAccept, memoireInput, memoireUndo, memoireRematch, buildMemoireView, clearMemoireTimers } = require('./memoireFlash.js');
-const { createAvGame, avAccept, avVerdict, avSkip, avRematch, buildAvView, clearAVTimers } = require('./actionVerite.js');
+const { createAvGame, avAccept, avChoose, avPrompt, avRespond, avRematch, buildAvView, clearAVTimers } = require('./actionVerite.js');
 const { createInfiltratedGame, startGame: startInfiltrated, nightEliminate, nightInvestigate, nightProtect, vote, buildView: buildInfiltratedView, emitGameState: emitInfiltratedState, clearTimers: clearInfiltratedTimers } = require('./infiltrated');
 
 const activeGames = new Map();
@@ -462,6 +462,34 @@ function setupGameEvents(socket, io, getUserId) {
     motIntrusMultiAccept(game, io);
   });
 
+  // Quiz multijoueur (mêmes questions pour tous, chacun à son rythme)
+  socket.on('quiz-create', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const others = Array.isArray(data.players) ? data.players.filter((p) => p && p !== userId) : [];
+    const all = [userId, ...others];
+    const game = createQuizGame(all, null, io);
+    game.createdBy = userId;
+    game.multiplayer = true; // quiz de la page Jeux (et non duel dans une conversation)
+    activeGames.set(game.id, game);
+    console.log(`🧠 Quiz multijoueur créé par ${userId} — ${all.length} joueurs`);
+    for (const p of all) {
+      io.to(`user:${p}`).emit('game-invite', { game: buildQuizView(game, p), from: userId });
+    }
+  });
+
+  // Lancement du quiz multijoueur (créateur uniquement)
+  socket.on('quiz-start', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game || game.type !== 'quiz') return;
+    if (game.createdBy !== userId) return;
+    if (game.state !== 'waiting') return;
+    game.state = 'playing';
+    quizAccept(game, io);
+  });
+
   socket.on('game-invite', (data) => {
     const userId = getUserId(socket);
     if (!userId) return;
@@ -573,11 +601,34 @@ function setupGameEvents(socket, io, getUserId) {
       clearQuizTimers(game);
       if (game.type === 'memoire_flash') clearMemoireTimers(game);
       if (game.type === 'action_verite') clearAVTimers(game);
+      if (game.type === 'a_quel_point') clearAqpTimers(game);
       if (game.type === 'infiltrated') {
         clearInfiltratedTimers(game);
       }
       activeGames.delete(data.gameId);
     }
+  });
+
+  // Abandon : un joueur arrête la partie pour TOUT LE MONDE
+  socket.on('game-abandon', (data) => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    const game = activeGames.get(data.gameId);
+    if (!game) return;
+    if (!game.players.includes(userId)) return;
+    clearQuizTimers(game);
+    if (game.type === 'memoire_flash') clearMemoireTimers(game);
+    if (game.type === 'action_verite') clearAVTimers(game);
+    if (game.type === 'a_quel_point') clearAqpTimers(game);
+    if (game.type === 'infiltrated') clearInfiltratedTimers(game);
+    game.state = 'finished';
+    game.winner = 'abandoned';
+    game.abandonedBy = userId;
+    console.log(`🚪 Partie abandonnée (${game.type}) par ${userId}`);
+    for (const p of game.players) {
+      io.to(`user:${p}`).emit('game-abandoned', { gameId: game.id, by: userId });
+    }
+    activeGames.delete(game.id);
   });
 
   socket.on('game-move', (data) => {
@@ -606,7 +657,7 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'next') quizNext(game, userId, io);
           break;
         case 'code_secret':
-          if (data.move === 'set_code' && data.symbol) setCode(game, userId, data.symbol, io);
+          if (data.move === 'set_code') setCode(game, userId, data.symbol, io, data.action || 'add');
           if (data.move === 'guess' && data.guess) makeGuess(game, userId, data.guess, io);
           break;
         case 'mot_intrus':
@@ -631,8 +682,9 @@ function setupGameEvents(socket, io, getUserId) {
           if (data.move === 'undo') memoireUndo(game, userId, io);
           break;
         case 'action_verite':
-          if (data.move === 'verdict' && data.accepted !== undefined) avVerdict(game, userId, !!data.accepted, io);
-          if (data.move === 'skip') avSkip(game, userId, io);
+          if (data.move === 'choose' && data.choice) avChoose(game, userId, data.choice, io);
+          if (data.move === 'prompt' && data.text !== undefined) avPrompt(game, userId, data.text, io);
+          if (data.move === 'respond') avRespond(game, userId, data.done !== undefined ? data.done : data.text, io);
           break;
         case 'mot_intrus_multi':
           if (data.move === 'answer' && data.answerIndex !== undefined) motIntrusMultiAnswer(game, userId, data.answerIndex, io);

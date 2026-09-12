@@ -1,13 +1,20 @@
 /**
- * Le Code Secret — Mastermind style game
- * Le créateur choisit un code de 4 symboles.
- * L'adversaire doit le deviner en 6 tentatives.
- * Vert = bon symbole, bonne position.
- * Orange = bon symbole, mauvaise position.
- * Rôle inverséaprèsfin.
+ * Le Code Secret — style Mastermind (duel 1v1)
+ *
+ * Déroulement :
+ *   1. Le créateur (celui qui a lancé la partie) compose un code de 4 couleurs.
+ *   2. L'adversaire a 6 tentatives pour le deviner.
+ *      Vert  = bonne couleur, bonne position
+ *      Orange = bonne couleur, mauvaise position
+ *   3. On inverse les rôles : le devineur compose à son tour son code,
+ *      et l'ancien créateur tente de le deviner.
+ *   4. Celui qui casse le code en le moins de tentatives gagne.
+ *
+ * Les couleurs sont des clés ('red', 'green'…) rendues côté client par de
+ * vraies pastilles de couleur — jamais d'emoji.
  */
 
-const SYMBOLS = ['🔴', '🟢', '🟣', '🟡', '🔵', '🟠'];
+const COLORS = ['red', 'green', 'blue', 'yellow', 'purple', 'orange'];
 const CODE_LENGTH = 4;
 const MAX_ATTEMPTS = 6;
 
@@ -15,41 +22,37 @@ function createGameId() {
   return 'cs_' + Math.random().toString(36).substring(2, 10);
 }
 
+/**
+ * Compare une proposition au code secret.
+ * Retourne un tableau indexé par POSITION : [{ color, status }]
+ * status ∈ 'correct' | 'wrong_position' | 'absent'
+ */
 function evaluateGuess(code, guess) {
-  const result = [];
-  // On utilise des indices pour éviter les conflits de symboles identiques
-  const codeRemaining = [...code];
-  const guessRemaining = [...guess];
   const usedCode = new Array(CODE_LENGTH).fill(false);
   const usedGuess = new Array(CODE_LENGTH).fill(false);
+  const result = new Array(CODE_LENGTH).fill(null);
 
-  // 1. Exact matches (vert)
+  // 1. Bonnes couleurs bien placées
   for (let i = 0; i < CODE_LENGTH; i++) {
     if (guess[i] === code[i]) {
-      result.push({ symbol: guess[i], status: 'correct', position: i });
+      result[i] = { color: guess[i], status: 'correct' };
       usedCode[i] = true;
       usedGuess[i] = true;
     }
   }
 
-  // 2. Wrong position (orange) — seulement pour les non-marques
+  // 2. Bonnes couleurs mal placées (chaque pion du code ne sert qu'une fois)
   for (let i = 0; i < CODE_LENGTH; i++) {
-    if (!usedGuess[i]) {
-      const idx = codeRemaining.findIndex(
-        (s, j) => !usedCode[j] && s === guess[i]
-      );
-      if (idx !== -1) {
-        result.push({ symbol: guess[i], status: 'wrong_position', position: i });
-        usedCode[idx] = true;
-        usedGuess[i] = true;
-      } else {
-        result.push({ symbol: guess[i], status: 'absent', position: i });
-      }
+    if (usedGuess[i]) continue;
+    const idx = code.findIndex((c, j) => !usedCode[j] && c === guess[i]);
+    if (idx !== -1) {
+      result[i] = { color: guess[i], status: 'wrong_position' };
+      usedCode[idx] = true;
+    } else {
+      result[i] = { color: guess[i], status: 'absent' };
     }
   }
 
-  // 3. Sort result by position for clean display
-  result.sort((a, b) => a.position - b.position);
   return result;
 }
 
@@ -59,164 +62,195 @@ function createCodeSecretGame(p1, p2) {
     type: 'code_secret',
     players: [p1, p2],
     state: 'waiting',
-    phase: 'setting_code',   // setting_code | guessing | result | finished
-    code: null,              // defined by initiator (hidden from guesser)
+    phase: 'setting_code',     // setting_code | guessing | finished
+    round: 1,                  // 1 = p1 crée / p2 devine, 2 = l'inverse
+    code: null,                // code secret (jamais envoyé au devineur)
+    _codeBuilding: [],         // code en cours de composition (créateur uniquement)
     codeCreator: p1,
     currentGuesser: p2,
-    attempts: [],
-    attemptsByPlayer: { [p1]: 0, [p2]: 0 },
-    currentGuess: [],
+    attemptsBy: { [p1]: [], [p2]: [] },
+    results: {},               // { [joueur]: { solved, attempts } }
     scores: { [p1]: 0, [p2]: 0 },
+    lastResult: null,
     winner: null,
     createdBy: p1,
-    deadline: null,
-    lastResult: null,
   };
 }
 
-// The creator sets the code
-function setCode(game, userId, symbol, io) {
-  if (game.state !== 'waiting' && game.state !== 'playing') return false;
+// ══════════════════════════════════════
+// COMPOSITION DU CODE (créateur)
+// ══════════════════════════════════════
+function setCode(game, userId, symbol, io, action = 'add') {
+  if (game.state !== 'playing') return false;
   if (game.phase !== 'setting_code') return false;
   if (userId !== game.codeCreator) return false;
-  if (!SYMBOLS.includes(symbol)) return false;
-  if (!game._codeBuilding) game._codeBuilding = [];
-  if (game._codeBuilding.length >= CODE_LENGTH) return false;
 
-  game._codeBuilding = [...game._codeBuilding, symbol];
+  if (action === 'remove') {
+    game._codeBuilding.pop();
+    emitCodeSecretState(io, game);
+    return true;
+  }
+  if (action === 'reset') {
+    game._codeBuilding = [];
+    emitCodeSecretState(io, game);
+    return true;
+  }
+
+  if (!COLORS.includes(symbol)) return false;
+  if (game._codeBuilding.length >= CODE_LENGTH) return false;
+  game._codeBuilding.push(symbol);
 
   if (game._codeBuilding.length === CODE_LENGTH) {
+    // Code verrouillé → au devineur de jouer
     game.code = [...game._codeBuilding];
-    // The guesser can now start trying
     game.phase = 'guessing';
-    game.deadline = Date.now() + 180000; // 3 min
-    emitCodeSecretState(io, game);
-  } else {
-    emitCodeSecretState(io, game);
+    game.lastResult = null;
   }
+  emitCodeSecretState(io, game);
   return true;
 }
 
+// ══════════════════════════════════════
+// TENTATIVE DU DEVINEUR
+// ══════════════════════════════════════
 function makeGuess(game, userId, guess, io) {
-  if (game.state !== 'playing' && game.state !== 'waiting') return false;
+  if (game.state !== 'playing') return false;
   if (game.phase !== 'guessing') return false;
   if (userId !== game.currentGuesser) return false;
   if (!Array.isArray(guess) || guess.length !== CODE_LENGTH) return false;
-  if (!guess.every(s => SYMBOLS.includes(s))) return false;
-  if (game.attempts.some(a => a.guess.join('') === guess.join(''))) return false; // duplicate guess
+  if (!guess.every((s) => COLORS.includes(s))) return false;
 
-  const attemptCount = (game.attemptsByPlayer[userId] || 0) + 1;
-  game.attemptsByPlayer[userId] = attemptCount;
+  const list = game.attemptsBy[userId];
+  const key = guess.join('-');
+  if (list.some((a) => a.guess.join('-') === key)) return false; // tentative déjà jouée
 
   const result = evaluateGuess(game.code, guess);
-  game.attempts.push({ guess, result, by: userId });
+  const solved = result.every((r) => r.status === 'correct');
+  list.push({ guess: [...guess], result });
 
-  const isComplete = result.every(r => r.status === 'correct');
+  game.lastResult = { guess: [...guess], result, correct: solved, by: userId };
 
-  game.lastResult = {
-    guess,
-    result: result.map(r => ({ symbol: r.symbol, status: r.status })),
-    correct: isComplete,
-    by: userId,
-  };
-
-  if (isComplete) {
-    // Guesser wins this round
-    if (userId === game.players[0]) game.scores[game.players[0]]++;
-    else game.scores[game.players[1]]++;
-
-    if (game.attemptsByPlayer[game.codeCreator] > 0 || game.attemptsByPlayer[game.currentGuesser] > 0) {
-      // Role swap: the guesser becomes the new creator
-      const newCreator = game.currentGuesser;
-      const newGuesser = game.codeCreator;
-      game.codeCreator = newCreator;
-      game.currentGuesser = newGuesser;
-      game._codeBuilding = [];
-      game.code = null;
-      game.attempts = [];
-      game.attemptsByPlayer = { [newCreator]: 0, [newGuesser]: 0 };
-      game.phase = 'setting_code';
-      game.currentGuess = [];
-      game.lastResult = null;
-      emitCodeSecretState(io, game);
-    } else {
-      // First round, no role swap — just mark complete
-      game.phase = 'result';
-      game.state = 'finished';
-      game.winner = userId;
-      emitCodeSecretState(io, game);
-    }
-  } else {
-    // Still guessing
-    game.deadline = Date.now() + 30000;
-    emitCodeSecretState(io, game);
+  if (solved) {
+    game.results[userId] = { solved: true, attempts: list.length };
+    // Moins de tentatives = plus de points
+    game.scores[userId] = MAX_ATTEMPTS + 1 - list.length;
+  } else if (list.length >= MAX_ATTEMPTS) {
+    game.results[userId] = { solved: false, attempts: list.length };
+    game.scores[userId] = 0;
   }
 
+  const roundOver = game.results[userId] !== undefined;
+
+  if (!roundOver) {
+    emitCodeSecretState(io, game);
+    return true;
+  }
+
+  if (game.round === 1) {
+    // Échange des rôles : le devineur compose le code à son tour
+    game.round = 2;
+    game.codeCreator = userId;
+    game.currentGuesser = game.players.find((p) => p !== userId);
+    game.code = null;
+    game._codeBuilding = [];
+    game.lastResult = null;
+    game.phase = 'setting_code';
+    emitCodeSecretState(io, game);
+  } else {
+    finishGame(game, io);
+  }
   return true;
 }
 
+function finishGame(game, io) {
+  game.state = 'finished';
+  game.phase = 'finished';
+  const [a, b] = game.players;
+  const sa = game.scores[a] || 0;
+  const sb = game.scores[b] || 0;
+  if (sa > sb) game.winner = a;
+  else if (sb > sa) game.winner = b;
+  else game.winner = 'draw';
+  emitCodeSecretState(io, game);
+}
+
+// ══════════════════════════════════════
+// VIE DE LA PARTIE
+// ══════════════════════════════════════
 function codeSecretAccept(game, io) {
   if (game.state === 'finished' || game._started) return;
   game._started = true;
   game.state = 'playing';
   game.phase = 'setting_code';
+  game.round = 1;
+  game.codeCreator = game.players[0];
+  game.currentGuesser = game.players[1];
+  game.code = null;
   game._codeBuilding = [];
+  game.attemptsBy = { [game.players[0]]: [], [game.players[1]]: [] };
+  game.results = {};
+  game.scores = { [game.players[0]]: 0, [game.players[1]]: 0 };
+  game.lastResult = null;
+  game.winner = null;
   emitCodeSecretState(io, game);
 }
 
 function codeSecretRematch(game, io) {
-  game.state = 'playing';
+  const [a, b] = game.players;
   game._started = true;
+  game.state = 'playing';
   game.phase = 'setting_code';
+  game.round = 1;
+  // On inverse qui commence (équité entre les deux parties)
+  game.codeCreator = game.codeCreator === a ? b : a;
+  game.currentGuesser = game.codeCreator === a ? b : a;
   game.code = null;
   game._codeBuilding = [];
-  game.currentGuesser = game.players[0] === game.codeCreator ? game.players[1] : game.players[0];
-  game.codeCreator = game.players[0] === game.codeCreator ? game.players[1] : game.players[0];
-  game.attempts = [];
-  game.attemptsByPlayer = { [game.players[0]]: 0, [game.players[1]]: 0 };
-  game.currentGuess = [];
+  game.attemptsBy = { [a]: [], [b]: [] };
+  game.results = {};
+  game.scores = { [a]: 0, [b]: 0 };
   game.lastResult = null;
-  game.deadline = null;
+  game.winner = null;
   emitCodeSecretState(io, game);
 }
 
 // ══════════════════════════════════════
-// VUE PAR JOUEUR
+// VUE PAR JOUEUR (le code ne fuite jamais)
 // ══════════════════════════════════════
+function buildView(game, viewer) {
+  const isCreator = viewer === game.codeCreator;
+  const isGuesser = viewer === game.currentGuesser;
+  const myRole = isCreator ? 'creator' : isGuesser ? 'guesser' : 'spectator';
+
+  return {
+    id: game.id,
+    type: 'code_secret',
+    players: game.players,
+    state: game.state,
+    phase: game.phase,
+    round: game.round,
+    scores: game.scores,
+    codeCreator: game.codeCreator,
+    currentGuesser: game.currentGuesser,
+    myRole,
+    colors: COLORS,
+    codeLength: CODE_LENGTH,
+    maxAttempts: MAX_ATTEMPTS,
+    // Seul le créateur voit son code en construction (jamais le code verrouillé)
+    myCode: isCreator && game.phase === 'setting_code' ? [...(game._codeBuilding || [])] : [],
+    // Tentatives du devineur en cours + résultat de la dernière
+    attempts: game.currentGuesser ? game.attemptsBy[game.currentGuesser] || [] : [],
+    lastResult: game.lastResult,
+    results: game.results,
+    winner: game.winner,
+    createdBy: game.createdBy,
+  };
+}
 
 function emitCodeSecretState(io, game) {
   if (!game || !io) return;
-
   for (const p of game.players) {
-    const isCreator = p === game.codeCreator;
-    const isGuesser = p === game.currentGuesser;
-    const view = {
-      id: game.id,
-      type: 'code_secret',
-      players: game.players,
-      state: game.state,
-      phase: game.phase,
-      scores: game.scores,
-      // Le créateur voit son code en construction
-      myCode: isCreator ? [...(game._codeBuilding || [])] : (isCreator ? undefined : undefined),
-      // L'adversaire voit les tentatives du créateur
-      attempts: game.attempts.map(a => ({
-        ...a,
-        guess: a.guess,
-        result: a.result,
-        by: a.by,
-      })),
-      attemptsByPlayer: { [p]: game.attemptsByPlayer[p] },
-      // Le code secret (seulement visible par le créateur pendant ou après)
-      code: isCreator && game.state === 'finished' ? game.code : (isCreator ? game.code : null),
-      showMyCode: isCreator && game._codeBuilding ? [...game._codeBuilding] : [],
-      lastResult: game.lastResult,
-      currentGuess: game.currentGuess,
-      deadline: game.deadline,
-      createdBy: game.createdBy,
-      _codeBuilding: game._codeBuilding ? [...game._codeBuilding] : [],
-    };
-    io.to(`user:${p}`).emit('game-state', { game: view });
+    io.to(`user:${p}`).emit('game-state', { game: buildView(game, p) });
   }
 }
 
@@ -227,9 +261,8 @@ module.exports = {
   codeSecretAccept,
   codeSecretRematch,
   emitCodeSecretState,
-  SYMBOLS,
+  buildView,
+  COLORS,
+  CODE_LENGTH,
   MAX_ATTEMPTS,
 };
-
-// La object for consistent import
-module.exports = module.exports;

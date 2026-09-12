@@ -122,15 +122,15 @@ async function buildAIPrompt() {
 
 Génère 20 questions originales de culture générale en FRANÇAIS.
 
-Exemples de questions CORRECTES (en français) :
-- "Quelle est la capitale de la France ?"
-- "Qui a écrit Les Misérables ?"
-- "En quelle année a eu lieu la Révolution française ?"
+Exemples de questions CORRECTES (cultivées mais accessibles) :
+- "Quel pays est surnommé « le pays du Soleil-Levant » ?"
+- "Quel fleuve traverse la ville du Caire ?"
+- "Qui a composé « La Flûte enchantée » ?"
 
-Exemples de questions INCORRECTES (en anglais - À ÉVITER) :
-- "What is the capital of France?"
-- "Who wrote Les Misérables?"
-- "What organ produces bile?"
+Exemples de questions INTERDITES (trop simples ou enfantines) :
+- "Combien de doigts a une main ?"
+- "De quelle couleur est le ciel ?"
+- "Combien de jours compte une semaine ?"
 
 Contraintes OBLIGATOIRES :
 - TOUTES les questions doivent commencer par des mots français (Quelle, Qui, Quel, Quels, Quelles, Combien, En quelle, Dans quel, etc.)
@@ -145,6 +145,9 @@ Contraintes OBLIGATOIRES :
   histoire, géographie, sciences, art, littérature, musique,
   cinéma, technologie, économie, culture africaine, monde,
   société, sport, architecture, mythologie, etc.
+- INTERDICTION ABSOLUE des questions triviales, enfantines ou évidentes (compter des doigts, des jours, des saisons, des roues…). Chaque question doit apprendre quelque chose.
+- Privilégie des questions de culture vivante : histoire, géographie (capitales, fleuves, monuments), sciences, art, littérature, musique, cinéma, sport, économie, culture africaine et mondiale, mythologie, architecture.
+- Utilise aussi des questions de comparaison et de classement (« Quel est le plus long… », « Quel pays compte le plus… », « Quelle œuvre a été créée avant… »).
 - Évite les questions extrêmement connues ou évidentes : aucun classique grand public.
 - La difficulté doit progressivement augmenter.
 - Les questions 1 à 5 : moyen
@@ -262,36 +265,36 @@ async function generateQuizPack(maxRetries = 3) {
 // pour que le jeu ne soit jamais bloqué.
 const FALLBACK_BANK = {
   facile: [
-    { question: 'Quelle est la capitale de la France ?', answers: ['Paris', 'Lyon', 'Marseille', 'Toulouse'], correctIndex: 0 },
-    { question: 'Combien de côtés possède un triangle ?', answers: ['4', '3', '5', '6'], correctIndex: 1 },
-    { question: 'Quelle planète est surnommée « la planète rouge » ?', answers: ['Vénus', 'Saturne', 'Mars', 'Jupiter'], correctIndex: 2 },
-    { question: 'Quel animal dit-on être le meilleur ami de l\'homme ?', answers: ['Le chat', 'Le chien', 'Le cheval', 'Le perroquet'], correctIndex: 1 },
-    { question: 'Quel est le symbole chimique de l\'eau ?', answers: ['O2', 'CO2', 'H2O', 'H2O2'], correctIndex: 2 },
-    { question: 'Combien de jours compte une année bissextile ?', answers: ['364', '365', '366', '367'], correctIndex: 2 },
-    { question: 'Quelle couleur mélange le bleu et le jaune ?', answers: ['Vert', 'Orange', 'Violet', 'Marron'], correctIndex: 0 },
-    { question: 'Combien de pattes a une araignée ?', answers: ['6', '8', '10', '12'], correctIndex: 1 },
-    { question: 'Quel est le plus grand animal terrestre ?', answers: ['L\'éléphant', 'La baleine', 'Le rhinocéros', 'La girafe'], correctIndex: 0 },
-    { question: 'Combien de continents y a-t-il sur Terre ?', answers: ['5', '6', '7', '8'], correctIndex: 2 },
-    { question: 'Quel fruit est jaune et courbé ?', answers: ['La pomme', 'La poire', 'La banane', 'L\'orange'], correctIndex: 2 },
-    { question: 'Combien de jours y a-t-il dans une semaine ?', answers: ['5', '6', '7', '8'], correctIndex: 2 },
-    { question: 'Quelle saison vient après l\'été ?', answers: ['Le printemps', 'L\'automne', 'L\'hiver', 'L\'été'], correctIndex: 1 },
-    { question: 'Quel instrument de musique a des touches noires et blanches ?', answers: ['La guitare', 'Le piano', 'La batterie', 'Le violon'], correctIndex: 1 },
-    { question: 'Combien de doigts a une main ?', answers: ['4', '5', '6', '7'], correctIndex: 1 },
-    { question: 'Quel est le contraire de « chaud » ?', answers: ['Froid', 'Tiède', 'Humide', 'Sec'], correctIndex: 0 },
-    { question: 'Combien de côtés possède un carré ?', answers: ['3', '4', '5', '6'], correctIndex: 1 },
-    { question: 'Quel animal est le symbole de la Chine ?', answers: ['Le tigre', 'Le panda', 'Le dragon', 'L\'éléphant'], correctIndex: 1 },
-    { question: 'Combien de minutes compte une heure ?', answers: ['50', '60', '70', '100'], correctIndex: 1 },
-    { question: 'Quel jour vient juste après mardi ?', answers: ['Lundi', 'Mercredi', 'Jeudi', 'Vendredi'], correctIndex: 1 },
-    { question: 'Combien de roues possède une voiture classique ?', answers: ['2', '4', '6', '8'], correctIndex: 1 },
-    { question: 'Quel instrument utilise-t-on pour peser ?', answers: ['La règle', 'La balance', 'Le thermomètre', 'Le compas'], correctIndex: 1 },
-    { question: 'Quel est le pluriel de « cheval » ?', answers: ['chevails', 'chevales', 'chevaux', 'chevauxs'], correctIndex: 2 },
-    { question: 'Combien d\'heures compte une journée ?', answers: ['12', '24', '36', '48'], correctIndex: 1 },
-    { question: 'Quelle boisson est fabriquée à partir de raisins ?', answers: ['La bière', 'Le lait', 'Le cidre', 'Le vin'], correctIndex: 3 },
-    { question: 'Dans quel pays est née la pizza ?', answers: ['En France', 'En Espagne', 'En Italie', 'Au Portugal'], correctIndex: 2 },
-    { question: 'Combien de doigts y a-t-il sur deux mains ?', answers: ['8', '10', '12', '20'], correctIndex: 1 },
-    { question: 'Quel mois vient juste après juin ?', answers: ['Mai', 'Juillet', 'Août', 'Septembre'], correctIndex: 1 },
-    { question: 'Quel animal fabrique le miel ?', answers: ['La guêpe', 'La mouche', 'Le papillon', 'L\'abeille'], correctIndex: 3 },
-    { question: 'Combien de saisons compte une année ?', answers: ['2', '3', '4', '5'], correctIndex: 2 },
+    { question: 'Quelle est la capitale du Sénégal ?', answers: ['Dakar', 'Abidjan', 'Bamako', 'Conakry'], correctIndex: 0 },
+    { question: 'Quel pays est surnommé « le pays du Soleil-Levant » ?', answers: ['La Chine', 'Le Japon', 'La Thaïlande', 'La Corée du Sud'], correctIndex: 1 },
+    { question: 'Qui a écrit la pièce « L\'Avare » ?', answers: ['Molière', 'Victor Hugo', 'Émile Zola', 'Jean Racine'], correctIndex: 0 },
+    { question: 'Quel est le plus long fleuve d\'Afrique ?', answers: ['Le Congo', 'Le Nil', 'Le Niger', 'Le Zambèze'], correctIndex: 1 },
+    { question: 'Quelle planète est la plus proche du Soleil ?', answers: ['Vénus', 'Mercure', 'La Terre', 'Mars'], correctIndex: 1 },
+    { question: 'Quelle est la langue la plus parlée au monde comme langue maternelle ?', answers: ['L\'anglais', 'Le mandarin', 'L\'espagnol', 'L\'hindi'], correctIndex: 1 },
+    { question: 'Quel monument se trouve à Agra, en Inde ?', answers: ['Le Taj Mahal', 'Angkor Wat', 'Pétra', 'Borobudur'], correctIndex: 0 },
+    { question: 'Combien de continents compte le monde ?', answers: ['5', '6', '7', '8'], correctIndex: 2 },
+    { question: 'Qui interprète le rôle principal dans le film « Titanic » ?', answers: ['Brad Pitt', 'Leonardo DiCaprio', 'Tom Cruise', 'Johnny Depp'], correctIndex: 1 },
+    { question: 'Quelle est la capitale officielle de la Côte d\'Ivoire ?', answers: ['Abidjan', 'Yamoussoukro', 'Accra', 'Lomé'], correctIndex: 1 },
+    { question: 'Quel gaz les plantes absorbent-elles pour la photosynthèse ?', answers: ['L\'oxygène', 'Le dioxyde de carbone', 'L\'azote', 'L\'hydrogène'], correctIndex: 1 },
+    { question: 'Qui a composé l\'opéra « La Flûte enchantée » ?', answers: ['Mozart', 'Beethoven', 'Bach', 'Vivaldi'], correctIndex: 0 },
+    { question: 'Quelle mer sépare l\'Europe de l\'Afrique ?', answers: ['La mer Rouge', 'La mer Méditerranée', 'La mer Noire', 'La mer Baltique'], correctIndex: 1 },
+    { question: 'Quel est le plus grand désert chaud du monde ?', answers: ['Le Gobi', 'Le Sahara', 'L\'Atacama', 'Le Kalahari'], correctIndex: 1 },
+    { question: 'Dans quelle ville se trouve le Colisée ?', answers: ['Athènes', 'Rome', 'Naples', 'Madrid'], correctIndex: 1 },
+    { question: 'Quelle vitamine trouve-t-on surtout dans les oranges ?', answers: ['Vitamine A', 'Vitamine C', 'Vitamine D', 'Vitamine K'], correctIndex: 1 },
+    { question: 'Quel pays a pour capitale Lisbonne ?', answers: ['L\'Espagne', 'Le Portugal', 'Le Brésil', 'L\'Italie'], correctIndex: 1 },
+    { question: 'Quelle est la capitale du Canada ?', answers: ['Toronto', 'Ottawa', 'Montréal', 'Vancouver'], correctIndex: 1 },
+    { question: 'Quelle est la plus grande île du monde ?', answers: ['Madagascar', 'Le Groenland', 'Bornéo', 'La Nouvelle-Guinée'], correctIndex: 1 },
+    { question: 'Combien de joueurs d\'une équipe de basket sont sur le terrain ?', answers: ['5', '6', '7', '4'], correctIndex: 0 },
+    { question: 'Quelle est la capitale de l\'Égypte ?', answers: ['Alexandrie', 'Le Caire', 'Louxor', 'Assouan'], correctIndex: 1 },
+    { question: 'Quel métal est liquide à température ambiante ?', answers: ['Le mercure', 'Le plomb', 'L\'étain', 'Le zinc'], correctIndex: 0 },
+    { question: 'Qui a été le premier président de la République française ?', answers: ['Napoléon III', 'Louis-Napoléon Bonaparte', 'Charles de Gaulle', 'Jules Grévy'], correctIndex: 1 },
+    { question: 'Quel sport pratique-t-on à Roland-Garros ?', answers: ['Le football', 'Le tennis', 'Le rugby', 'Le golf'], correctIndex: 1 },
+    { question: 'Quelle est la capitale de l\'Allemagne ?', answers: ['Munich', 'Berlin', 'Francfort', 'Hambourg'], correctIndex: 1 },
+    { question: 'Quel animal est capable de changer de couleur ?', answers: ['Le caméléon', 'Le gecko', 'L\'iguane', 'Le varan'], correctIndex: 0 },
+    { question: 'Quelle est la capitale du Kenya ?', answers: ['Mombasa', 'Nairobi', 'Kisumu', 'Dakar'], correctIndex: 1 },
+    { question: 'Quel pays a offert la statue de la Liberté aux États-Unis ?', answers: ['Le Royaume-Uni', 'La France', 'L\'Espagne', 'Les Pays-Bas'], correctIndex: 1 },
+    { question: 'Quel est l\'organe qui filtre le sang dans le corps humain ?', answers: ['Le foie', 'Les reins', 'La rate', 'L\'estomac'], correctIndex: 1 },
+    { question: 'Quelle est la capitale de la Turquie ?', answers: ['Istanbul', 'Ankara', 'Izmir', 'Bursa'], correctIndex: 1 },
   ],
   moyen: [
     { question: 'En quelle année a eu lieu la Révolution française ?', answers: ['1799', '1789', '1776', '1815'], correctIndex: 1 },
@@ -335,7 +338,7 @@ const FALLBACK_BANK = {
     { question: 'Quelle est la capitale du Canada ?', answers: ['Toronto', 'Vancouver', 'Ottawa', 'Montréal'], correctIndex: 2 },
     { question: 'En quelle année a été créé le World Wide Web ?', answers: ['1985', '1990', '1995', '2000'], correctIndex: 1 },
     { question: 'Quel est le fleuve le plus long du monde ?', answers: ['L\'Amazone', 'Le Nil', 'Le Mississippi', 'Le Yangtsé'], correctIndex: 1 },
-    { question: 'Combien de pays bordent la Méditerranée ?', answers: ['18', '21', '24', '27'], correctIndex: 1 },
+    { question: 'Combien de pays bordent la mer Méditerranée ?', answers: ['15', '21', '28', '34'], correctIndex: 1 },
     { question: 'Quelle est la monnaie du Japon ?', answers: ['Le won', 'Le yuan', 'Le yen', 'Le ringgit'], correctIndex: 2 },
     { question: 'En quelle année a été fondé l\'État d\'Israël ?', answers: ['1945', '1948', '1950', '1952'], correctIndex: 1 },
     { question: 'Quel est le désert le plus chaud du monde ?', answers: ['Le Sahara', 'Le désert de Gobi', 'Le désert d\'Atacama', 'Le désert de Kalahari'], correctIndex: 0 },
@@ -370,7 +373,7 @@ const FALLBACK_BANK = {
     { question: 'Quelle est la capitale du Bhoutan ?', answers: ['Thimphou', 'Paro', 'Punakha', 'Wangdue'], correctIndex: 0 },
     { question: 'En quelle année a eu lieu la bataille de Waterloo ?', answers: ['1805', '1812', '1815', '1820'], correctIndex: 2 },
     { question: 'Quel est le métal le plus abondant dans la croûte terrestre ?', answers: ['Le fer', 'L\'aluminium', 'Le cuivre', 'Le zinc'], correctIndex: 1 },
-    { question: 'Combien d\'espèces de pingouins existent-elles ?', answers: ['12', '17', '22', '27'], correctIndex: 1 },
+    { question: 'Quelle famille d\'animaux compte le plus grand nombre d\'espèces ?', answers: ['Les mammifères', 'Les insectes', 'Les oiseaux', 'Les reptiles'], correctIndex: 1 },
     { question: 'Quelle est la capitale du Suriname ?', answers: ['Paramaribo', 'Lelydorp', 'Nieuw Nickerie', 'Albina'], correctIndex: 0 },
     { question: 'En quelle année a été découverte la pénicilline ?', answers: ['1925', '1928', '1932', '1935'], correctIndex: 1 },
     { question: 'Quelle est la capitale du Kazakhstan ?', answers: ['Almaty', 'Astana', 'Bichkek', 'Tachkent'], correctIndex: 1 },
@@ -581,24 +584,35 @@ async function fallbackPack() {
 // ══════════════════════════════════════
 
 function createQuizGame(p1, p2, io) {
+  // Accepte aussi un tableau de joueurs (quiz multijoueur 2 à 8 joueurs)
+  const players = Array.isArray(p1) ? [...p1] : [p1, p2];
   const game = {
     id: createGameId(), type: 'quiz',
-    players: [p1, p2],
-    scores: { [p1]: 0, [p2]: 0 },
-    correctCount: { [p1]: 0, [p2]: 0 },
+    players,
+    scores: {},
+    correctCount: {},
     state: 'waiting',          // waiting | playing | finished
     quizStatus: 'generating',  // generating | ready
     quizError: null,
     questions: [],             // pack partagé (avec correctIndex, côté serveur uniquement)
-    order: { [p1]: [], [p2]: [] },
-    progress: { [p1]: 0, [p2]: 0 },   // nb de questions répondues par joueur
-    pstate: { [p1]: 'idle', [p2]: 'idle' }, // idle | question | feedback | done
-    deadline: { [p1]: null, [p2]: null },
-    lastResult: { [p1]: null, [p2]: null },
+    order: {},
+    progress: {},              // nb de questions répondues par joueur
+    pstate: {},                // idle | question | feedback | done
+    deadline: {},
+    lastResult: {},
     winner: null,
-    createdBy: p1,
+    createdBy: players[0],
     _timers: {},
   };
+  for (const p of players) {
+    game.scores[p] = 0;
+    game.correctCount[p] = 0;
+    game.order[p] = [];
+    game.progress[p] = 0;
+    game.pstate[p] = 'idle';
+    game.deadline[p] = null;
+    game.lastResult[p] = null;
+  }
 
   // Génération UNE seule fois, en arrière-plan. Le jeu est créé immédiatement
   // (la carte d'invitation s'affiche), puis le pack arrive quand il est prêt.
@@ -616,9 +630,9 @@ function createQuizGame(p1, p2, io) {
 function onPackReady(game, io, pack) {
   game.questions = pack;
   game.quizStatus = 'ready';
-  game.order[game.players[0]] = shuffleIndices(pack.length);
-  game.order[game.players[1]] = shuffleIndices(pack.length);
-  console.log(`🧠 Quiz prêt : ${pack.length} questions pour ${game.players[0]} vs ${game.players[1]}`);
+  // Chaque joueur reçoit le MÊME pack, mais dans un ordre mélangé qui lui est propre
+  for (const p of game.players) game.order[p] = shuffleIndices(pack.length);
+  console.log(`🧠 Quiz prêt : ${pack.length} questions pour ${game.players.length} joueur(s)`);
   emitQuizState(io, game);
   if (game.state === 'playing') startQuiz(game, io);
 }
@@ -709,16 +723,18 @@ function quizNext(game, userId, io) {
 
 function maybeFinish(game, io) {
   if (game.state !== 'playing') return;
-  const [a, b] = game.players;
-  if (game.pstate[a] === 'done' && game.pstate[b] === 'done') {
-    game.state = 'finished';
-    clearQuizTimers(game);
-    if (game.scores[a] > game.scores[b]) game.winner = a;
-    else if (game.scores[a] < game.scores[b]) game.winner = b;
-    else game.winner = 'draw';
-    console.log(`🧠 Quiz terminé : ${game.winner} (${game.scores[a]} vs ${game.scores[b]})`);
-    emitQuizState(io, game);
+  if (!game.players.every(p => game.pstate[p] === 'done')) return;
+  game.state = 'finished';
+  clearQuizTimers(game);
+  let best = null, bestScore = -1, tie = false;
+  for (const p of game.players) {
+    const s = game.scores[p] || 0;
+    if (s > bestScore) { best = p; bestScore = s; tie = false; }
+    else if (s === bestScore) { tie = true; }
   }
+  game.winner = tie ? 'draw' : best;
+  console.log(`🧠 Quiz terminé : ${game.winner}`);
+  emitQuizState(io, game);
 }
 
 async function quizRematch(game, io) {
@@ -765,7 +781,6 @@ function clearQuizTimers(game) {
 // ══════════════════════════════════════
 
 function buildQuizView(game, viewer) {
-  const other = game.players.find(p => p !== viewer);
   const pack = (game.questions || []).map(q => ({
     id: q.id,
     question: q.question,
@@ -774,6 +789,9 @@ function buildQuizView(game, viewer) {
     points: q.points,
     // correctIndex délibérément omis
   }));
+  const opponents = game.players
+    .filter(p => p !== viewer)
+    .map(p => ({ id: p, progress: game.progress[p] || 0, score: game.scores[p] || 0 }));
   return {
     id: game.id,
     type: 'quiz',
@@ -789,7 +807,11 @@ function buildQuizView(game, viewer) {
     pstate: game.pstate[viewer],
     deadline: game.deadline[viewer],
     lastResult: game.lastResult[viewer],
-    opponent: { progress: game.progress[other] },
+    // Rétrocompat duo + liste complète pour le multijoueur
+    opponent: { progress: game.progress[opponents[0]?.id] || 0 },
+    opponents,
+    // true quand la partie vient de la page Jeux (quiz multijoueur)
+    multiplayer: !!game.multiplayer,
     winner: game.winner,
     createdBy: game.createdBy,
   };

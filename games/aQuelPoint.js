@@ -235,6 +235,14 @@ function clearAqpTimers(game) {
 // VUE PAR JOUEUR
 // ══════════════════════════════════════
 
+function compatibilityMessage(pct) {
+  if (pct >= 90) return "Impressionnant ! Vous vous connaissez par cœur.";
+  if (pct >= 70) return "Très bon score — vous êtes vraiment proches.";
+  if (pct >= 50) return "Pas mal ! Il vous reste quelques choses à découvrir.";
+  if (pct >= 30) return "Vous ne vous connaissez pas assez… il faut passer plus de temps ensemble !";
+  return "Aïe… vous êtes pratiquement des inconnus l'un pour l'autre !";
+}
+
 function emitView(io, game) {
   if (!io || !game) return;
   for (const p of game.players) {
@@ -251,6 +259,9 @@ function emitView(io, game) {
       phase: game.phase,
       currentQuestion: game.currentQuestion,
       settingIndex: game.settingIndex || 0,
+      // Qui joue en ce moment (pour afficher le bon nom côté client)
+      settingPlayer: game.settingPlayer,
+      guessingPlayer: game.guessingPlayer,
       // Le joueur qui remplit voit les questions, l'autre voit "En attente..."
       canSet: isSetting && (game.phase === 'setting_p1' || game.phase === 'setting_p2'),
       // Le joueur qui devine voit les questions, l'autre voit "En attente..."
@@ -261,6 +272,7 @@ function emitView(io, game) {
       guessedCount: Object.keys(game.guesses[p] || {}).length,
       lastResult: game.lastResult,
       compatibility: game.compatibility,
+      compatibilityMessage: game.state === 'finished' ? compatibilityMessage(game.compatibility) : null,
       winner: game.winner,
       createdBy: game.createdBy,
     };
