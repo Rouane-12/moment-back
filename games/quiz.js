@@ -11,7 +11,7 @@
  * traitées.
  */
 
-const axios = require('axios');
+const { aiGenerateJSON, hasAnyProvider, configuredProviders } = require('../utils/aiProvider');
 const QuizQuestion = require('../models/QuizQuestion');
 const { normalizeText, createHash, isExactDuplicate, isSemanticSimilar, normalizeQuestion } = require('../utils/quizDuplicateChecker');
 // OpenTDB removed - returns English questions. Using only AI + local French bank.
@@ -208,8 +208,11 @@ function buildPack(rawList) {
 }
 
 async function generateQuizPack(maxRetries = 3) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY absente du .env');
+  if (!hasAnyProvider()) {
+    throw new Error(
+      'Aucune clé IA configurée (GEMINI_API_KEY, OPENAI_API_KEY ou PERPLEXITY_API_KEY)'
+    );
+  }
 
   // Clean up English questions from database before generating
   try {
@@ -223,25 +226,16 @@ async function generateQuizPack(maxRetries = 3) {
 
     const prompt = await buildAIPrompt();
 
-    const res = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-4o-mini',
-        temperature: 1.1,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: prompt },
-        ],
-      },
-      {
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        timeout: 45000,
-      }
-    );
+    // Fournisseur multi-IA (Gemini → OpenAI → Perplexity).
+    const { data: parsed, provider } = await aiGenerateJSON({
+      systemPrompt: prompt,
+      userPrompt: 'Génère maintenant le pack de 20 questions en respectant strictement le format JSON demandé.',
+      temperature: 1.1,
+      maxTokens: 8000,
+      json: true,
+    });
+    console.log(`Questions générées via ${provider}`);
 
-    const content = res.data?.choices?.[0]?.message?.content;
-    const cleaned = String(content || '').replace(/```(?:json)?/gi, '').trim();
-    const parsed = JSON.parse(cleaned);
     const rawList = Array.isArray(parsed) ? parsed : parsed?.questions;
     const pack = buildPack(rawList);
 
@@ -416,13 +410,21 @@ async function filterAndSaveQuestions(questions, source) {
       continue;
     }
     
-    // Check for semantic similarity with recent questions
-    const recentQuestions = await QuizQuestion.find({})
-      .sort({ lastUsedAt: -1 })
-      .limit(50)
-      .select('text');
-    
-    if (isSemanticSimilar(q.question, recentQuestions.map(rq => rq.text), 0.7)) {
+    // Check for semantic similarity with recent questions.
+    // Si la base est indisponible, on ne jette pas les questions de l'IA :
+    // on saute simplement la détection de similarité.
+    let recentTexts = [];
+    try {
+      const recentQuestions = await QuizQuestion.find({})
+        .sort({ lastUsedAt: -1 })
+        .limit(50)
+        .select('text');
+      recentTexts = recentQuestions.map(rq => rq.text);
+    } catch (error) {
+      console.error('Error fetching recent questions:', error.message);
+    }
+
+    if (isSemanticSimilar(q.question, recentTexts, 0.7)) {
       console.log(`Skipping semantically similar question: ${q.question}`);
       continue;
     }

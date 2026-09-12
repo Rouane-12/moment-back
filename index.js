@@ -15,12 +15,28 @@ const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 5200;
 
-// Diagnostic : la clé OpenAI doit être visible dès le démarrage
-if (!process.env.OPENAI_API_KEY) {
-  console.warn('⚠️  OPENAI_API_KEY absente — quiz et Action ou Vérité utiliseront la banque de secours locale.');
-} else {
-  console.log('🔑 OPENAI_API_KEY chargée (définit ' + process.env.OPENAI_API_KEY.slice(0, 7) + '…)');
-}
+// Diagnostic : indique clairement quelles IA sont utilisables au démarrage.
+const { configuredProviders } = require('./utils/aiProvider');
+(() => {
+  const providers = configuredProviders();
+  if (providers.length === 0) {
+    console.warn(
+      '⚠️  Aucune clé IA détectée — quiz et Action ou Vérité utiliseront la banque de secours locale.\n' +
+      '    Ajoute GEMINI_API_KEY (recommandé), OPENAI_API_KEY ou PERPLEXITY_API_KEY dans .env (local) ' +
+      'et dans les variables d\'environnement de Render (production).'
+    );
+  } else {
+    console.log('🔑 Fournisseurs IA détectés (ordre d\'essai) : ' + providers.join(' → '));
+    const shown = {
+      gemini: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+      openai: process.env.OPENAI_API_KEY,
+      perplexity: process.env.PERPLEXITY_API_KEY,
+    };
+    for (const p of providers) {
+      console.log(`   • ${p} : ${String(shown[p]).slice(0, 7)}…`);
+    }
+  }
+})();
 
 // CORS allowed origins
 const allowedOrigins = [
