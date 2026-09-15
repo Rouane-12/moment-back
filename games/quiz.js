@@ -21,6 +21,8 @@ const QUESTION_TIME_MS = 20000; // 20s par question
 const FEEDBACK_TIME_MS = 6000;  // 6s d'affichage du résultat avant la suivante
 const TIERS = ['facile', 'moyen', 'difficile', 'tres_difficile', 'expert'];
 const TIER_POINTS = { facile: 100, moyen: 200, difficile: 300, tres_difficile: 500, expert: 600 };
+// Niveaux de difficulté sélectionnables par les joueurs (carte d'invitation / page Jeux)
+const QUIZ_LEVELS = ['facile', 'moyen', 'difficile', 'tres_difficile'];
 
 // OpenTDB session token (initialized on first use)
 // opentdbToken removed - no longer using OpenTDB
@@ -53,6 +55,18 @@ async function getUsedQuestionsText() {
     console.error('Error fetching used questions:', error.message);
     return '';
   }
+}
+
+// Filtre allégé : rejette uniquement les questions CLAIREMENT anglaises.
+// Utilisé pour les niveaux de difficulté choisis (moyen/difficile) afin de ne
+// pas jeter des questions valides à cause du filtre strict.
+function isMostlyFrench(question) {
+  const q = (question.question || '').toLowerCase();
+  const englishStarters = ['what ', 'where ', 'when ', 'who ', 'why ', 'how ', 'which ', 'whose '];
+  if (englishStarters.some(s => q.startsWith(s))) return false;
+  const allText = (q + ' ' + (question.answers || []).join(' ')).toLowerCase();
+  const englishWords = [' the ', ' and ', ' with ', ' from ', ' was ', ' were ', ' have ', ' has ', ' does ', ' typically '];
+  return !englishWords.some(w => allText.includes(w));
 }
 
 // Vérifie si une question est en français (détection robuste)
@@ -112,8 +126,17 @@ async function cleanupEnglishQuestions() {
   }
 }
 
-async function buildAIPrompt() {
+async function buildAIPrompt(level = null) {
   const usedQuestions = await getUsedQuestionsText();
+  const levelSpec = level ? `NIVEAU DE DIFFICULTÉ DEMANDÉ : ${level}.
+
+TOUTES les questions doivent correspondre à ce niveau :
+- facile : grande culture accessible à tous — capitales, monuments célèbres, pays, grands fleuves et océans, planètes, inventions, classiques de la musique et du cinéma, proverbes. Question que l'on peut réussir en réfléchissant un peu, jamais technique. JAMAIS enfantine.
+- moyen : il faut vraiment réfléchir — auteurs et œuvres littéraires, événements historiques datés, institutions et organismes, sciences de base poussées, sport de haut niveau, économie, géographie détaillée (fleuves, montagnes, déserts).
+- difficile : pour les passionnés — histoire ancienne et médiévale, science avancée, œuvres d'art précises, littérature et philosophie, mythologie, économie avancée, architecture, musique classique.
+- tres_difficile : pour les spécialistes — dates précises, chiffres exacts, événements et personnages peu connus, domaines pointus (sciences, art, histoire, géopolitique).
+
+La difficulté PROGRESSIVE sur 20 questions ne s'applique plus : toutes les questions sont du même niveau.` : ''
   return `Tu es le générateur officiel du quiz de l'application.
 
 ⚠️ RÈGLE ABSOLUE : GÉNÈRE EXCLUSIVEMENT DES QUESTIONS ET RÉPONSES EN FRANÇAIS.
@@ -122,6 +145,7 @@ async function buildAIPrompt() {
 
 Génère 20 questions originales de culture générale en FRANÇAIS.
 
+${levelSpec}
 Exemples de questions CORRECTES (cultivées mais accessibles) :
 - "Quel pays est surnommé « le pays du Soleil-Levant » ?"
 - "Quel fleuve traverse la ville du Caire ?"
@@ -154,6 +178,8 @@ Contraintes OBLIGATOIRES :
 - 6 à 10 : moyen/difficile
 - 11 à 15 : difficile
 - 16 à 20 : très difficile
+
+⚠️ ATTENTION : les 4 règles de progression ci-dessus ne s'appliquent QUE si aucun niveau de difficulté spécifique n'est demandé. Si un niveau est demandé, ignore ces 4 lignes et suis le NIVEAU DE DIFFICULTÉ DEMANDÉ.
 - CHAQUE partie doit être entièrement nouvelle : ne réutilise jamais une question, un sujet ou un fait déjà généré lors d'une partie précédente.
 - Ne reformule jamais une question déjà fournie précédemment.
 - Ne produis jamais une question portant sur exactement le même fait qu'une question précédente.
@@ -170,26 +196,27 @@ ${usedQuestions ? '- ' + usedQuestions : '(aucune question enregistrée)'}
 Réponds uniquement avec le JSON demandé : {"questions":[{"question":"...","answers":["...","...","...","..."],"correctIndex":0}]}`;
 }
 
-function buildPack(rawList) {
+function buildPack(rawList, level = null) {
   if (!Array.isArray(rawList) || rawList.length < PACK_SIZE) return null;
   const pack = [];
-  for (let i = 0; i < PACK_SIZE; i++) {
+  for (let i = 0; i < rawList.length && pack.length < PACK_SIZE; i++) {
     const q = rawList[i];
-    if (!q || typeof q.question !== 'string' || !q.question.trim()) return null;
-    if (!Array.isArray(q.answers) || q.answers.length !== 4) return null;
-    if (q.answers.some(a => typeof a !== 'string' || !a.trim())) return null;
+    if (!q || typeof q.question !== 'string' || !q.question.trim()) continue;
+    if (!Array.isArray(q.answers) || q.answers.length !== 4) continue;
+    if (q.answers.some(a => typeof a !== 'string' || !a.trim())) continue;
     const correctIndex = Number(q.correctIndex);
-    if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex > 3) return null;
-    
-    // Vérifie que la question est en français
-    if (!isFrenchQuestion(q)) {
+    if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex > 3) continue;
+
+    // Niveau choisi : on accepte un filtrage plus souple (niveau « moyen » etc.)
+    const frenchOk = level ? isMostlyFrench(q) : isFrenchQuestion(q);
+    if (!frenchOk) {
       console.log(`Question en anglais détectée et rejetée: ${q.question}`);
       continue; // Skip this question
     }
-    
-    const tier = TIERS[Math.floor(i / 5)];
+
+    const tier = level || TIERS[Math.floor(pack.length / 5)];
     pack.push({
-      id: `q${i + 1}`,
+      id: `q${pack.length + 1}`,
       question: q.question.trim(),
       answers: q.answers.map(a => a.trim()),
       correctIndex,
@@ -197,17 +224,17 @@ function buildPack(rawList) {
       points: TIER_POINTS[tier] || 200,
     });
   }
-  
+
   // Si on n'a pas assez de questions après filtrage, retourne null
   if (pack.length < PACK_SIZE) {
     console.log(`Pas assez de questions en français après filtrage: ${pack.length}/${PACK_SIZE}`);
     return null;
   }
-  
+
   return pack;
 }
 
-async function generateQuizPack(maxRetries = 3) {
+async function generateQuizPack(maxRetries = 3, level = null) {
   if (!hasAnyProvider()) {
     throw new Error(
       'Aucune clé IA configurée (GEMINI_API_KEY, OPENAI_API_KEY ou PERPLEXITY_API_KEY)'
@@ -224,7 +251,7 @@ async function generateQuizPack(maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     console.log(`AI generation attempt ${attempt}/${maxRetries}`);
 
-    const prompt = await buildAIPrompt();
+    const prompt = await buildAIPrompt(level);
 
     // Fournisseur multi-IA (Gemini → OpenAI → Perplexity).
     const { data: parsed, provider } = await aiGenerateJSON({
@@ -237,7 +264,7 @@ async function generateQuizPack(maxRetries = 3) {
     console.log(`Questions générées via ${provider}`);
 
     const rawList = Array.isArray(parsed) ? parsed : parsed?.questions;
-    const pack = buildPack(rawList);
+    const pack = buildPack(rawList, level);
 
     if (!pack) {
       console.log(`Attempt ${attempt}: Pack invalide ou trop de questions en anglais`);
@@ -436,7 +463,7 @@ async function filterAndSaveQuestions(questions, source) {
   // If we filtered out too many questions, try to fetch from database
   if (filtered.length < PACK_SIZE) {
     console.log(`Filtered pack has only ${filtered.length} questions, fetching from database...`);
-    const dbQuestions = await fetchUnusedQuestions(PACK_SIZE - filtered.length);
+    const dbQuestions = await fetchUnusedQuestions(PACK_SIZE - filtered.length, null); // complément tout niveau
     filtered.push(...dbQuestions);
   }
   
@@ -483,12 +510,16 @@ async function saveQuestionToDatabase(question, source, gameId = null) {
   }
 }
 
-async function fetchUnusedQuestions(count) {
+async function fetchUnusedQuestions(count, level = null) {
   try {
     // Fetch questions with lowest usage count
-    const questions = await QuizQuestion.find({ isDuplicate: false })
+    // Avec un niveau choisi : on ne garde que les questions de ce niveau
+    // (sinon on élargit à x3 pour compenser le filtrage français).
+    const query = { isDuplicate: false };
+    if (level) query.difficulty = level;
+    const questions = await QuizQuestion.find(query)
       .sort({ usedCount: 1, lastUsedAt: 1 })
-      .limit(count * 3) // Fetch triple to filter out non-French questions
+      .limit(level ? count * 2 : count * 3)
       .lean();
 
     // Filter out non-French questions
@@ -535,7 +566,7 @@ async function fetchUnusedQuestions(count) {
 // retombent jamais sur les mêmes questions de la banque locale.
 const recentFallbackQuestions = [];
 
-async function fallbackPack() {
+async function fallbackPack(level = null) {
   // Clean up English questions from database (one-time cleanup)
   try {
     await cleanupEnglishQuestions();
@@ -545,9 +576,9 @@ async function fallbackPack() {
 
   // Try to fetch from database first
   try {
-    const dbQuestions = await fetchUnusedQuestions(PACK_SIZE);
+    const dbQuestions = await fetchUnusedQuestions(PACK_SIZE, level);
     if (dbQuestions.length >= PACK_SIZE) {
-      console.log('Using questions from database');
+      console.log('Using questions from database' + (level ? ` (niveau ${level})` : ''));
       return dbQuestions.slice(0, PACK_SIZE);
     }
   } catch (error) {
@@ -558,6 +589,19 @@ async function fallbackPack() {
   console.log('Using local fallback bank');
   const pack = [];
   let id = 1;
+  if (level) {
+    // Niveau choisi : 20 questions prises DANS LE SEUL niveau demandé
+    const bank = FALLBACK_BANK[level] || [];
+    if (bank.length >= PACK_SIZE) {
+      const pool = shuffleIndices(bank.length).slice(0, PACK_SIZE).map(i => bank[i]);
+      for (const q of pool) {
+        recentFallbackQuestions.push(q.question);
+        pack.push({ id: `q${id++}`, ...q, difficulty: level, points: TIER_POINTS[level] });
+      }
+      return pack;
+    }
+    console.log(`Banque locale insuffisante pour le niveau ${level}, pack mixte utilisé`);
+  }
   for (const tier of TIERS) {
     const bank = FALLBACK_BANK[tier];
     if (!bank || bank.length === 0) continue; // 'expert' n'a pas de banque locale
@@ -585,7 +629,7 @@ async function fallbackPack() {
 // VIE DE LA PARTIE
 // ══════════════════════════════════════
 
-function createQuizGame(p1, p2, io) {
+function createQuizGame(p1, p2, io, level = null) {
   // Accepte aussi un tableau de joueurs (quiz multijoueur 2 à 8 joueurs)
   const players = Array.isArray(p1) ? [...p1] : [p1, p2];
   const game = {
@@ -604,6 +648,7 @@ function createQuizGame(p1, p2, io) {
     lastResult: {},
     winner: null,
     createdBy: players[0],
+    difficultyLevel: level, // niveau choisi : facile | moyen | difficile | tres_difficile
     _timers: {},
   };
   for (const p of players) {
@@ -618,11 +663,11 @@ function createQuizGame(p1, p2, io) {
 
   // Génération UNE seule fois, en arrière-plan. Le jeu est créé immédiatement
   // (la carte d'invitation s'affiche), puis le pack arrive quand il est prêt.
-  generateQuizPack()
+  generateQuizPack(3, level)
     .then(pack => onPackReady(game, io, pack))
     .catch(async (err) => {
       console.error('🧠 Génération IA indisponible, pack de secours :', err.message);
-      const fallback = await fallbackPack();
+      const fallback = await fallbackPack(level);
       onPackReady(game, io, fallback);
     });
 
@@ -757,11 +802,11 @@ async function quizRematch(game, io) {
   emitQuizState(io, game);
   
   // Generate new questions for rematch to avoid repetition
-  generateQuizPack()
+  generateQuizPack(3, game.difficultyLevel)
     .then(pack => onPackReady(game, io, pack))
     .catch(async (err) => {
       console.error('🧠 Génération IA indisponible pour revanche, pack de secours :', err.message);
-      const fallback = await fallbackPack();
+      const fallback = await fallbackPack(game.difficultyLevel);
       onPackReady(game, io, fallback);
     });
 }
@@ -814,6 +859,7 @@ function buildQuizView(game, viewer) {
     opponents,
     // true quand la partie vient de la page Jeux (quiz multijoueur)
     multiplayer: !!game.multiplayer,
+    difficultyLevel: game.difficultyLevel || null,
     winner: game.winner,
     createdBy: game.createdBy,
   };
@@ -840,4 +886,5 @@ module.exports = {
   FALLBACK_BANK,
   TIERS,
   fallbackPack,
+  QUIZ_LEVELS,
 };

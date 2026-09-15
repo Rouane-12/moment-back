@@ -15,6 +15,7 @@ const { createMemoireGame, memoireAccept, memoireInput, memoireUndo, memoireRema
 const { createAvGame, avAccept, avChoose, avPrompt, avRespond, avRematch, buildAvView, clearAVTimers } = require('./actionVerite.js');
 const { createDiceDuelGame, diceDuelAccept, diceDuelMove, diceDuelRematch } = require('./diceDuel.js');
 const { createDiceSpiraleGame, diceSpiraleAccept, diceSpiraleRoll, diceSpiraleRematch } = require('./diceSpirale.js');
+const { QUIZ_LEVELS } = require('./quiz.js');
 const { createInfiltratedGame, startGame: startInfiltrated, nightEliminate, nightInvestigate, nightProtect, vote, buildView: buildInfiltratedView, emitGameState: emitInfiltratedState, clearTimers: clearInfiltratedTimers } = require('./infiltrated');
 
 const activeGames = new Map();
@@ -470,7 +471,8 @@ function setupGameEvents(socket, io, getUserId) {
     if (!userId) return;
     const others = Array.isArray(data.players) ? data.players.filter((p) => p && p !== userId) : [];
     const all = [userId, ...others];
-    const game = createQuizGame(all, null, io);
+    const level = QUIZ_LEVELS.includes(data.level) ? data.level : null;
+    const game = createQuizGame(all, null, io, level);
     game.createdBy = userId;
     game.multiplayer = true; // quiz de la page Jeux (et non duel dans une conversation)
     activeGames.set(game.id, game);
@@ -526,7 +528,7 @@ function setupGameEvents(socket, io, getUserId) {
       case 'tictactoe': game = createTicTacToeGame(userId, to); break;
       case 'rps': game = createRPSGame(userId, to); break;
       case 'dice': game = createDiceGame(userId, to); break;
-      case 'quiz': game = createQuizGame(userId, to, io); break;
+      case 'quiz': game = createQuizGame(userId, to, io, QUIZ_LEVELS.includes(data.level) ? data.level : null); break;
       case 'code_secret': game = createCodeSecretGame(userId, to); break;
       case 'mot_intrus': game = createMotIntrusGame(userId, to); break;
       case 'devine_ce_que_je_pense': game = createDevineCeQueJePenseGame(userId, to); break;
