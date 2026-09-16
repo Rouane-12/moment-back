@@ -506,6 +506,21 @@ function setupGameEvents(socket, io, getUserId) {
     diceSpiraleAccept(game, io);
   });
 
+  // Resynchronisation : renvoie à ce socket l'état de chaque partie spirale qu'il suit.
+  // Indispensable après une reconnexion (le nouveau socket a peut-être raté le dernier
+  // game-state — typiquement au passage de main joueur 1 → joueur 2).
+  socket.on('game-sync', () => {
+    const userId = getUserId(socket);
+    if (!userId) return;
+    activeGames.forEach((game) => {
+      if (game.type !== 'dice_spirale') return;
+      if (!game.players.includes(userId)) return;
+      if (game.state === 'playing' || game.state === 'finished') {
+        socket.emit('game-state', { game });
+      }
+    });
+  });
+
   // Lancement du quiz multijoueur (créateur uniquement)
   socket.on('quiz-start', (data) => {
     const userId = getUserId(socket);

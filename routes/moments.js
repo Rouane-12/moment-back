@@ -1,9 +1,71 @@
 const express = require('express');
 const Itinerary = require('../models/Itinerary');
+const ActivityVenue = require('../models/ActivityVenue');
 const { composeMoment } = require('../services/momentEngine');
 const { auth, optionalAuth } = require('../middleware/auth');
 
 const router = express.Router();
+
+/**
+ * POST /api/moments/activity
+ * Crée un « moment d'activité » : une sortie planifiée à un lieu d'activité
+ * (académie de foot, salle de boxe, piscine…). Contrairement au moment détente,
+ * il n'y a pas de parcours généré — c'est une sortie unique, datée.
+ * Body : { activityVenueId, date, startTime, peopleCount }
+ */
+router.post('/activity', auth, async (req, res, next) => {
+  try {
+    const { activityVenueId, date, startTime, peopleCount } = req.body;
+    const people = Math.max(1, parseInt(peopleCount) || 1);
+
+    const venue = await ActivityVenue.findById(activityVenueId);
+    if (!venue || venue.status !== 'approved') {
+      return res.status(404).json({ success: false, message: 'Lieu d\'activité non trouvé' });
+    }
+    if (!date) {
+      return res.status(400).json({ success: false, message: 'La date est obligatoire' });
+    }
+
+    const start = startTime || '16:00';
+    const itinerary = await Itinerary.create({
+      userId: req.user._id,
+      city: venue.city || 'Cotonou',
+      date,
+      startTime: start,
+      endTime: start,
+      peopleCount: people,
+      budget: 0,
+      totalPrice: 0,
+      momentType: 'activite',
+      title: venue.name,
+      theme: { key: 'activite', label: 'Activité', emoji: '⚽' },
+      steps: [{
+        activityVenueId: venue._id,
+        type: 'activity_venue',
+        startTime: start,
+        endTime: start,
+        price: 0,
+        distanceKm: 0,
+        order: 0
+      }],
+      status: 'generated'
+    });
+
+    res.status(201).json({
+      success: true,
+      moment: {
+        id: itinerary._id,
+        title: itinerary.title,
+        date: itinerary.date,
+        startTime: itinerary.startTime,
+        peopleCount: itinerary.peopleCount,
+        momentType: 'activite'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.post('/generate', optionalAuth, async (req, res, next) => {
   try {
@@ -143,19 +205,22 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
 
 router.get('/', auth, async (req, res, next) => {
   try {
-    const { status } = req.query;
+    const { status, type } = req.query;
 
     const filter = { userId: req.user._id };
     if (status) filter.status = status;
+    if (type) filter.momentType = type;
 
     const itineraries = await Itinerary.find(filter)
       .populate('steps.venueId')
+      .populate('steps.activityVenueId')
       .sort({ createdAt: -1 });
 
     const moments = itineraries.map(it => ({
       _id: it._id,
       title: it.title,
       theme: it.theme,
+      momentType: it.momentType || 'detente',
       date: it.date,
       startTime: it.startTime,
       peopleCount: it.peopleCount,
@@ -166,7 +231,14 @@ router.get('/', auth, async (req, res, next) => {
       steps: it.steps.map(step => ({
         venue: {
           media: step.venueId?.media || []
-        }
+        },
+        activityVenue: step.activityVenueId ? {
+          id: step.activityVenueId._id,
+          name: step.activityVenueId.name,
+          activity: step.activityVenueId.activity,
+          city: step.activityVenueId.city,
+          district: step.activityVenueId.district
+        } : null
       }))
     }));
 

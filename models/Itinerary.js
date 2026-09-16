@@ -4,7 +4,11 @@ const itineraryStepSchema = new mongoose.Schema({
   venueId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Venue',
-    required: true
+    required: false // requis pour les moments détente, absent pour les moments activité
+  },
+  activityVenueId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ActivityVenue'
   },
   offerId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -16,7 +20,7 @@ const itineraryStepSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['venue', 'offer', 'event'],
+    enum: ['venue', 'offer', 'event', 'activity_venue'],
     required: true
   },
   startTime: {
@@ -69,6 +73,12 @@ const itinerarySchema = new mongoose.Schema({
   budget: {
     type: Number,
     required: true
+  },
+  // Type de moment : détente (parcours généré) ou activité (sortie sportive/loisirs planifiée)
+  momentType: {
+    type: String,
+    enum: ['detente', 'activite'],
+    default: 'detente'
   },
   totalPrice: {
     type: Number,
