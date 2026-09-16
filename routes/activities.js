@@ -78,17 +78,21 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
 });
 
 /**
- * POST /api/activities   (admin uniquement)
- * L'admin ajoute un lieu d'activité directement (publié immédiatement).
- * Les partenaires passent par le circuit de demande + paiement, comme pour les lieux détente.
+ * POST /api/activities
+ * - Admin : ajoute le lieu directement (publié immédiatement).
+ * - Partenaire : crée une DEMANDE de lieu d'activité (statut pending) — l'admin la
+ *   valide ensuite, comme pour les lieux détente. Utilisateurs simples : refusé.
  */
-router.post('/', auth, requireRole('admin', 'super_admin'), async (req, res, next) => {
+router.post('/', auth, requireRole('admin', 'super_admin', 'partner_owner', 'partner_manager'), async (req, res, next) => {
   try {
     const { name, activity, description, address, district, city, phone, whatsapp, latitude, longitude, horaires, googleMapsUrl } = req.body;
 
     if (!name || !activity) {
       return res.status(400).json({ success: false, message: 'Le nom et le type d\'activité sont obligatoires' });
     }
+
+    const role = req.user.role;
+    const isAdmin = ['admin', 'super_admin'].includes(role);
 
     const item = await ActivityVenue.create({
       name: String(name).trim(),
@@ -104,11 +108,25 @@ router.post('/', auth, requireRole('admin', 'super_admin'), async (req, res, nex
       horaires,
       googleMapsUrl,
       submittedBy: req.user._id,
-      status: 'approved',
-      source: 'admin',
+      status: isAdmin ? 'approved' : 'pending',
+      source: isAdmin ? 'admin' : 'partner',
     });
 
     res.status(201).json({ success: true, activity: item });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/activities/my-requests   (partenaire)
+ * Les demandes de lieux d'activité soumises par ce partenaire.
+ */
+router.get('/my-requests', auth, requireRole('partner_owner', 'partner_manager'), async (req, res, next) => {
+  try {
+    const items = await ActivityVenue.find({ submittedBy: req.user._id })
+      .sort({ createdAt: -1 });
+    res.json({ success: true, activities: items });
   } catch (error) {
     next(error);
   }
