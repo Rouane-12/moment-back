@@ -15,8 +15,9 @@ const router = express.Router();
  */
 router.post('/activity', auth, async (req, res, next) => {
   try {
-    const { activityVenueId, date, startTime, peopleCount } = req.body;
+    const { activityVenueId, date, startTime, peopleCount, budgetPerPerson } = req.body;
     const people = Math.max(1, parseInt(peopleCount) || 1);
+    const budgetPp = Math.max(0, parseInt(budgetPerPerson) || 0);
 
     const venue = await ActivityVenue.findById(activityVenueId);
     if (!venue || venue.status !== 'approved') {
@@ -34,8 +35,8 @@ router.post('/activity', auth, async (req, res, next) => {
       startTime: start,
       endTime: start,
       peopleCount: people,
-      budget: 0,
-      totalPrice: 0,
+      budget: budgetPp * people,
+      totalPrice: budgetPp * people,
       momentType: 'activite',
       title: venue.name,
       theme: { key: 'activite', label: 'Activité', emoji: '⚽' },
@@ -162,8 +163,9 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
       id: itinerary._id,
       title: itinerary.title,
       theme: itinerary.theme,
+      momentType: itinerary.momentType || 'detente',
       steps: itinerary.steps.map(step => ({
-        venue: {
+        venue: step.venueId ? {
           id: step.venueId._id,
           name: step.venueId.name,
           category: step.venueId.category,
@@ -174,7 +176,19 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
           longitude: step.venueId.longitude,
           address: step.venueId.address,
           image: step.venueId.media?.[0]?.url || ''
-        },
+        } : null,
+        activityVenue: step.activityVenueId ? {
+          id: step.activityVenueId._id,
+          name: step.activityVenueId.name,
+          activity: step.activityVenueId.activity,
+          district: step.activityVenueId.district,
+          city: step.activityVenueId.city,
+          address: step.activityVenueId.address,
+          phone: step.activityVenueId.phone,
+          whatsapp: step.activityVenueId.whatsapp,
+          horaires: step.activityVenueId.horaires,
+          googleMapsUrl: step.activityVenueId.googleMapsUrl
+        } : null,
         start: step.startTime,
         end: step.endTime,
         price: step.price,

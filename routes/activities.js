@@ -78,22 +78,17 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
 });
 
 /**
- * POST /api/activities
- * Soumission d'un nouveau lieu d'activité.
- * - Partenaire ou admin : créé immédiatement (admin = approuvé, partenaire = en attente).
- * - Utilisateur simple : en attente de validation admin.
+ * POST /api/activities   (admin uniquement)
+ * L'admin ajoute un lieu d'activité directement (publié immédiatement).
+ * Les partenaires passent par le circuit de demande + paiement, comme pour les lieux détente.
  */
-router.post('/', auth, async (req, res, next) => {
+router.post('/', auth, requireRole('admin', 'super_admin'), async (req, res, next) => {
   try {
-    const role = req.user.role;
     const { name, activity, description, address, district, city, phone, whatsapp, latitude, longitude, horaires, googleMapsUrl } = req.body;
 
     if (!name || !activity) {
       return res.status(400).json({ success: false, message: 'Le nom et le type d\'activité sont obligatoires' });
     }
-
-    const isAdmin = ['admin', 'super_admin'].includes(role);
-    const isPartner = ['partner_owner', 'partner_manager'].includes(role);
 
     const item = await ActivityVenue.create({
       name: String(name).trim(),
@@ -109,8 +104,8 @@ router.post('/', auth, async (req, res, next) => {
       horaires,
       googleMapsUrl,
       submittedBy: req.user._id,
-      status: isAdmin ? 'approved' : 'pending',
-      source: isAdmin ? 'admin' : isPartner ? 'partner' : 'user',
+      status: 'approved',
+      source: 'admin',
     });
 
     res.status(201).json({ success: true, activity: item });

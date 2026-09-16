@@ -1,6 +1,8 @@
 /**
- * Seed des lieux d'activités — données initiales vérifiées (Bénin).
- * Usage : node seed-activities.js
+ * Lieux d'activités — données initiales vérifiées (Bénin).
+ * - Exécutable : node seed-activities.js
+ * - Importable : seedActivities() est appelé automatiquement au démarrage du serveur
+ *   (idempotent : n'insère que si la collection est vide, ne duplique jamais).
  *
  * Les champs non vérifiés sont null (pas de coordonnées inventées).
  */
@@ -66,14 +68,19 @@ const ACTIVITIES = [
   { id: 40, nom: 'HEVIOXO MMA Club', activity: 'arts_martiaux', adresse: null, quartier: 'Haie Vive', ville: 'Cotonou', telephone: '+229 51 78 55 08 / 96 06 92 58', whatsapp: null, lat: null, lng: null, horaires: 'Selon programme', maps: 'https://www.google.com/maps/search/?api=1&query=HEVIOXO+MMA+Club+Cotonou' },
 ];
 
-async function main() {
-  await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/moment');
-  console.log('📦 Connecté à MongoDB');
-
-  let inserted = 0, skipped = 0;
+/**
+ * Insère les 40 lieux si la collection est vide. Idempotent et sûr à chaque démarrage.
+ * Retourne { inserted, skipped }.
+ */
+async function seedActivities() {
+  const existing = await ActivityVenue.estimatedDocumentCount();
+  if (existing > 0) {
+    return { inserted: 0, skipped: existing };
+  }
+  let inserted = 0;
   for (const a of ACTIVITIES) {
     const exists = await ActivityVenue.findOne({ name: a.nom, city: a.ville });
-    if (exists) { skipped++; continue; }
+    if (exists) continue;
     await ActivityVenue.create({
       name: a.nom,
       activity: a.activity,
@@ -91,8 +98,19 @@ async function main() {
     });
     inserted++;
   }
+  return { inserted, skipped: 0 };
+}
+
+async function main() {
+  await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/moment');
+  console.log('📦 Connecté à MongoDB');
+  const { inserted, skipped } = await seedActivities();
   console.log(`✅ Lieux d'activités insérés : ${inserted} — déjà présents : ${skipped}`);
   await mongoose.disconnect();
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+if (require.main === module) {
+  main().catch((e) => { console.error(e); process.exit(1); });
+}
+
+module.exports = { seedActivities, ACTIVITIES };

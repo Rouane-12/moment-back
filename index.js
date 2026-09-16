@@ -205,7 +205,15 @@ app.get('/api/presence/:userId', (req, res) => {
 // For local development
 if (require.main === module) {
   const dbConnect = require('./config/db');
-  dbConnect().then(() => {
+  dbConnect().then(async () => {
+    // Auto-seed des lieux d'activités au premier démarrage (idempotent)
+    try {
+      const { seedActivities } = require('./seed-activities');
+      const { inserted } = await seedActivities();
+      if (inserted > 0) console.log(`🏃 ${inserted} lieux d'activités insérés au démarrage`);
+    } catch (e) {
+      console.warn('⚠️  Auto-seed activités échoué (non bloquant) :', e.message);
+    }
     server.listen(port, () => {
       console.log(`Backend running on http://localhost:${port}`);
     });
