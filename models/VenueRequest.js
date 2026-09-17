@@ -104,6 +104,11 @@ const venueRequestSchema = new mongoose.Schema({
     type: { type: String, default: 'image' },
     sortOrder: { type: Number, default: 0 }
   }],
+  // Tarifs & services : chaque prestation a un nom (ex : « Normal », « Premium », « Menu complet ») et un prix
+  offers: [{
+    name: { type: String, required: true, trim: true },
+    price: { type: Number, required: true, min: 0 }
+  }],
   rating: {
     type: Number,
     min: 0,

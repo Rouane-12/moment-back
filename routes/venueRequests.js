@@ -200,6 +200,8 @@ router.post('/:id/create-venue', auth, requireRole('admin', 'super_admin'), asyn
       tags: request.tags || [],
       idealFor: request.idealFor || [],
       capacity: request.capacity || undefined,
+      // Tarifs & services saisis par le partenaire dans sa demande
+      offers: (request.offers || []).filter(o => o && o.name && typeof o.price === 'number'),
       priceRange: {
         min: request.priceRange?.min || undefined,
         max: request.priceRange?.max || undefined,

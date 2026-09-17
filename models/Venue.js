@@ -124,6 +124,11 @@ const venueSchema = new mongoose.Schema({
     },
     basis: String
   },
+  // Tarifs & services proposés par le lieu (ex : Normal 2 000, Premium 5 000)
+  offers: [{
+    name: { type: String, required: true, trim: true },
+    price: { type: Number, required: true, min: 0 }
+  }],
   durationMinutes: {
     min: Number,
     max: Number
