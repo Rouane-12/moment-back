@@ -20,6 +20,86 @@ const { createInfiltratedGame, startGame: startInfiltrated, nightEliminate, nigh
 
 const activeGames = new Map();
 
+// ══════════════════════════════════════
+// PERSISTANCE (survit aux redéploiements Render)
+// ══════════════════════════════════════
+// Chaque mutation de partie est sauvegardée en base (fire-and-forget : jamais
+// bloquant pour la partie). Au retour d'un joueur (game-sync ou reconnexion),
+// si la partie a disparu de la mémoire (redémarrage du serveur), elle est
+// restaurée depuis Mongo.
+const GameModel = require('../models/Game');
+
+// Champs internes non sérialisables (timers Node) — retirés à la sauvegarde
+const NON_PERSISTED_KEYS = [
+  '_timer', 'timers', 'nightTimer', 'discussionTimer', 'voteTimer', 'avTimer',
+  'memoireTimer', 'quizTimer', 'aqpTimer', 'diceTimer', '_timers',
+];
+
+function sanitizeForPersist(game) {
+  if (!game || typeof game !== 'object') return {};
+  const clone = JSON.parse(JSON.stringify(game, (key, value) => {
+    if (NON_PERSISTED_KEYS.includes(key)) return undefined;
+    // Les fonctions et les timers sont exclus silencieusement
+    if (typeof value === 'function') return undefined;
+    return value;
+  }));
+  return clone;
+}
+
+function persistGame(game) {
+  if (!game || !game.id || !game.type) return;
+  try {
+    const doc = {
+      gameId: String(game.id),
+      type: String(game.type),
+      players: (game.players || []).map(String),
+      state: String(game.state || 'waiting'),
+      data: sanitizeForPersist(game),
+      updatedAt: new Date(),
+    };
+    GameModel.findOneAndUpdate(
+      { gameId: doc.gameId },
+      doc,
+      { upsert: true, new: true }
+    ).catch((e) => {
+      // Non bloquant — la partie continue en mémoire même si Mongo échoue
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('💾 Persistance partie échouée :', e.message);
+      }
+    });
+  } catch (e) {
+    // JSON.stringify peut échouer sur une structure cyclique : on ignore
+  }
+}
+
+function deletePersistedGame(gameId) {
+  GameModel.deleteOne({ gameId: String(gameId) }).catch(() => {});
+}
+
+async function restoreGames() {
+  try {
+    const docs = await GameModel.find({}).lean();
+    let restored = 0;
+    for (const doc of docs) {
+      if (!doc.data || activeGames.has(doc.gameId)) continue;
+      // Les timers ne survivent pas : les jeux à timeout passeront
+      // naturellement à leur état d'attente ; les parties en cours restent
+      // consultables et rejouables via game-sync.
+      activeGames.set(doc.gameId, { ...doc.data, _restored: true });
+      restored++;
+    }
+    if (restored > 0) console.log(`💾 ${restored} partie(s) de jeux restaurée(s) depuis la base`);
+  } catch (e) {
+    console.warn('⚠️  Restauration des parties impossible :', e.message);
+  }
+}
+
+// Purge explicite (fin de partie, abandon, refus) → suppression en base + mémoire
+function purgeGame(gameId) {
+  activeGames.delete(gameId);
+  deletePersistedGame(gameId);
+}
+
 function createGameId() {
   return Math.random().toString(36).substring(2, 10);
 }
@@ -50,6 +130,7 @@ function emitGameState(io, game) {
   for (const p of game.players) {
     io.to(`user:${p}`).emit('game-state', { game });
   }
+  persistGame(game);
 }
 
 // ══════════════════════════════════════
@@ -305,6 +386,7 @@ function setupGameEvents(socket, io, getUserId) {
     const players = Array.isArray(data.players) ? data.players.filter((p) => p && p !== userId) : [];
     for (const p of players) addPlayer(game, p, io);
     activeGames.set(game.id, game);
+    persistGame(game);
     console.log(`🎯 Buzzer Quiz créé par ${userId} — ${game.players.length} joueurs`);
     for (const p of game.players) {
       io.to(`user:${p}`).emit('game-invite', { game: buildBuzzerView(game, p), from: userId });
@@ -320,6 +402,7 @@ function setupGameEvents(socket, io, getUserId) {
     const game = createInfiltratedGame(userId, players);
     if (!game) return; // moins de 4 joueurs au total : refusé par le moteur
     activeGames.set(game.id, game);
+    persistGame(game);
     console.log(`🕵️ Infiltré créé par ${userId} — ${game.players.length} joueurs`);
 
     for (const playerId of game.players) {
@@ -506,17 +589,32 @@ function setupGameEvents(socket, io, getUserId) {
     diceSpiraleAccept(game, io);
   });
 
-  // Resynchronisation : renvoie à ce socket l'état de chaque partie spirale qu'il suit.
+  // Resynchronisation : renvoie à ce socket l'état de chaque partie qu'il suit.
   // Indispensable après une reconnexion (le nouveau socket a peut-être raté le dernier
-  // game-state — typiquement au passage de main joueur 1 → joueur 2).
-  socket.on('game-sync', () => {
+  // game-state). Si la partie a disparu de la mémoire (redémarrage du serveur),
+  // elle est restaurée depuis la base pour que les joueurs reprennent où ils en étaient.
+  socket.on('game-sync', async () => {
     const userId = getUserId(socket);
     if (!userId) return;
+    // Restauration après redémarrage : les parties persistées de ce joueur
+    // qui ne sont plus en mémoire sont remises dans activeGames.
+    try {
+      const docs = await GameModel.find({ players: userId }).lean();
+      for (const doc of docs) {
+        if (activeGames.has(doc.gameId) || !doc.data) continue;
+        if (doc.state === 'finished') continue;
+        activeGames.set(doc.gameId, { ...doc.data, _restored: true });
+        console.log(`💾 Partie ${doc.gameId} (${doc.type}) restaurée pour ${userId}`);
+      }
+    } catch (e) {
+      // restauration impossible : on continue avec ce qui est en mémoire
+    }
     activeGames.forEach((game) => {
-      if (game.type !== 'dice_spirale') return;
-      if (!game.players.includes(userId)) return;
-      if (game.state === 'playing' || game.state === 'finished') {
-        socket.emit('game-state', { game });
+      if (!game.players || !game.players.includes(userId)) return;
+      if (game.type === 'dice_spirale' || game.type === 'dice_duel' || game.type === 'infiltrated' || game.type === 'buzzer_quiz') {
+        if (game.state === 'playing' || game.state === 'waiting' || game.state === 'finished') {
+          socket.emit('game-state', { game: game.type === 'infiltrated' ? buildInfiltratedView(game, userId) : game });
+        }
       }
     });
   });
@@ -556,6 +654,7 @@ function setupGameEvents(socket, io, getUserId) {
     }
     game.createdBy = userId;
     activeGames.set(game.id, game);
+    persistGame(game);
     console.log(`🎮 Game invite: ${gameType} from ${userId} to ${to}`);
     if (game.type === 'quiz') {
       // Vue par joueur : le pack contient les bonnes réponses côté serveur
@@ -638,7 +737,7 @@ function setupGameEvents(socket, io, getUserId) {
     game.state = 'finished';
     game.winner = 'declined';
     emitGameState(io, game);
-    activeGames.delete(data.gameId);
+    purgeGame(data.gameId);
   });
 
   socket.on('game-close', (data) => {
@@ -651,7 +750,7 @@ function setupGameEvents(socket, io, getUserId) {
       if (game.type === 'infiltrated') {
         clearInfiltratedTimers(game);
       }
-      activeGames.delete(data.gameId);
+      purgeGame(data.gameId);
     }
   });
 
@@ -674,7 +773,7 @@ function setupGameEvents(socket, io, getUserId) {
     for (const p of game.players) {
       io.to(`user:${p}`).emit('game-abandoned', { gameId: game.id, by: userId });
     }
-    activeGames.delete(game.id);
+    purgeGame(game.id);
   });
 
   socket.on('game-move', (data) => {
@@ -819,10 +918,12 @@ function setupGameEvents(socket, io, getUserId) {
         for (const p of game.players) {
           if (p !== userId) io.to(`user:${p}`).emit('game-state', { game });
         }
-        activeGames.delete(id);
+        purgeGame(id);
+      } else {
+        persistGame(game);
       }
     }
   });
 }
 
-module.exports = { setupGameEvents, activeGames };
+module.exports = { setupGameEvents, activeGames, restoreGames, persistGame, purgeGame };

@@ -85,7 +85,7 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
  */
 router.post('/', auth, requireRole('admin', 'super_admin', 'partner_owner', 'partner_manager'), async (req, res, next) => {
   try {
-    const { name, activity, description, address, district, city, phone, whatsapp, latitude, longitude, horaires, googleMapsUrl } = req.body;
+    const { name, activity, description, address, district, city, phone, whatsapp, latitude, longitude, horaires, priceIndication, googleMapsUrl } = req.body;
 
     if (!name || !activity) {
       return res.status(400).json({ success: false, message: 'Le nom et le type d\'activité sont obligatoires' });
@@ -106,6 +106,7 @@ router.post('/', auth, requireRole('admin', 'super_admin', 'partner_owner', 'par
       latitude: latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : undefined,
       longitude: longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : undefined,
       horaires,
+      priceIndication: priceIndication ? String(priceIndication).trim().slice(0, 200) : undefined,
       googleMapsUrl,
       submittedBy: req.user._id,
       status: isAdmin ? 'approved' : 'pending',

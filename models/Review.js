@@ -6,10 +6,21 @@ const reviewSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  // Cible de l'avis : lieu de détente (Venue) ou lieu d'activité (ActivityVenue)
+  targetType: {
+    type: String,
+    enum: ['venue', 'activity_venue'],
+    default: 'venue',
+  },
   venue: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Venue',
-    required: true
+    default: null,
+  },
+  activityVenue: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ActivityVenue',
+    default: null,
   },
   rating: {
     type: Number,
@@ -53,6 +64,7 @@ const reviewSchema = new mongoose.Schema({
 });
 
 reviewSchema.index({ venue: 1, createdAt: -1 });
+reviewSchema.index({ activityVenue: 1, createdAt: -1 });
 reviewSchema.index({ user: 1 });
 reviewSchema.index({ rating: 1 });
 

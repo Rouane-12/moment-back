@@ -214,6 +214,13 @@ if (require.main === module) {
     } catch (e) {
       console.warn('⚠️  Auto-seed activités échoué (non bloquant) :', e.message);
     }
+    // Restauration des parties de jeux survivant à un redémarrage
+    try {
+      const { restoreGames } = require('./games/gameEngine');
+      await restoreGames();
+    } catch (e) {
+      console.warn('⚠️  Restauration des parties échouée (non bloquant) :', e.message);
+    }
     server.listen(port, () => {
       console.log(`Backend running on http://localhost:${port}`);
     });

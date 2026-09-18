@@ -1,16 +1,35 @@
 const express = require('express');
 const Review = require('../models/Review');
 const Venue = require('../models/Venue');
+const ActivityVenue = require('../models/ActivityVenue');
 const { auth, optionalAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Create a review
+// Recalcule la note moyenne d'une cible (Venue ou ActivityVenue) après création/modification/suppression d'un avis.
+async function refreshTargetRating(targetType, targetId) {
+  if (!targetId) return;
+  const field = targetType === 'activity_venue' ? 'activityVenue' : 'venue';
+  const Model = targetType === 'activity_venue' ? ActivityVenue : Venue;
+  const reviews = await Review.find({ [field]: targetId });
+  const avgRating = reviews.length > 0
+    ? Math.round((reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length) * 10) / 10
+    : 0;
+  await Model.findByIdAndUpdate(targetId, {
+    rating: avgRating,
+    reviewCount: reviews.length,
+  });
+}
+
+// Create a review (lieu de détente OU lieu d'activité)
 router.post('/', auth, async (req, res, next) => {
   try {
-    const { venueId, rating, title, comment, images } = req.body;
+    const { venueId, activityVenueId, rating, title, comment, images } = req.body;
 
-    if (!venueId || !rating || !title || !comment) {
+    const isActivity = !!activityVenueId;
+    const targetId = isActivity ? activityVenueId : venueId;
+
+    if (!targetId || !rating || !title || !comment) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
@@ -18,10 +37,26 @@ router.post('/', auth, async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' });
     }
 
+    // Vérifie que la cible existe
+    if (isActivity) {
+      const venue = await ActivityVenue.findById(activityVenueId);
+      if (!venue) {
+        return res.status(404).json({ success: false, message: 'Lieu d\'activité non trouvé' });
+      }
+    } else {
+      const venue = await Venue.findById(venueId);
+      if (!venue) {
+        return res.status(404).json({ success: false, message: 'Venue not found' });
+      }
+    }
+
+    const targetType = isActivity ? 'activity_venue' : 'venue';
+    const targetField = isActivity ? 'activityVenue' : 'venue';
+
     // Check if user already reviewed this venue
     const existingReview = await Review.findOne({
       user: req.user._id,
-      venue: venueId
+      [targetField]: targetId,
     });
 
     if (existingReview) {
@@ -30,21 +65,15 @@ router.post('/', auth, async (req, res, next) => {
 
     const review = await Review.create({
       user: req.user._id,
-      venue: venueId,
+      targetType,
+      [targetField]: targetId,
       rating,
       title,
       comment,
       images: images || []
     });
 
-    // Update venue rating
-    const venueReviews = await Review.find({ venue: venueId });
-    const avgRating = venueReviews.reduce((sum, r) => sum + r.rating, 0) / venueReviews.length;
-    
-    await Venue.findByIdAndUpdate(venueId, {
-      rating: Math.round(avgRating * 10) / 10,
-      reviewCount: venueReviews.length
-    });
+    await refreshTargetRating(targetType, targetId);
 
     const populatedReview = await Review.findById(review._id)
       .populate('user', 'firstName lastName avatar')
@@ -54,6 +83,42 @@ router.post('/', auth, async (req, res, next) => {
       success: true,
       message: 'Review created successfully',
       review: populatedReview
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get reviews for an activity venue
+router.get('/activity/:activityVenueId', optionalAuth, async (req, res, next) => {
+  try {
+    const { activityVenueId } = req.params;
+    const { page = 1, limit = 10, sort = 'recent' } = req.query;
+
+    const sortOptions = {
+      recent: { createdAt: -1 },
+      helpful: { helpfulCount: -1 },
+      highest: { rating: -1 },
+      lowest: { rating: 1 }
+    };
+
+    const reviews = await Review.find({ activityVenue: activityVenueId })
+      .populate('user', 'firstName lastName avatar')
+      .sort(sortOptions[sort] || sortOptions.recent)
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    const total = await Review.countDocuments({ activityVenue: activityVenueId });
+
+    res.json({
+      success: true,
+      reviews,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
     next(error);
@@ -101,6 +166,7 @@ router.get('/my-reviews', auth, async (req, res, next) => {
   try {
     const reviews = await Review.find({ user: req.user._id })
       .populate('venue', 'name category city')
+      .populate('activityVenue', 'name activity city')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -131,6 +197,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
     const reviews = await Review.find(filter)
       .populate('user', 'firstName lastName avatar')
       .populate('venue', 'name category city')
+      .populate('activityVenue', 'name activity city')
       .sort(sortOptions[sort] || sortOptions.recent)
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
@@ -174,14 +241,7 @@ router.put('/:id', auth, async (req, res, next) => {
 
     await review.save();
 
-    // Update venue rating
-    const venueReviews = await Review.find({ venue: review.venue });
-    const avgRating = venueReviews.reduce((sum, r) => sum + r.rating, 0) / venueReviews.length;
-    
-    await Venue.findByIdAndUpdate(review.venue, {
-      rating: Math.round(avgRating * 10) / 10,
-      reviewCount: venueReviews.length
-    });
+    await refreshTargetRating(review.targetType, review.targetType === 'activity_venue' ? review.activityVenue : review.venue);
 
     const populatedReview = await Review.findById(review._id)
       .populate('user', 'firstName lastName avatar')
@@ -213,18 +273,14 @@ router.delete('/:id', auth, async (req, res, next) => {
     }
 
     const venueId = review.venue;
+    const activityVenueId = review.activityVenue;
     await Review.findByIdAndDelete(req.params.id);
 
-    // Update venue rating
-    const venueReviews = await Review.find({ venue: venueId });
-    const avgRating = venueReviews.length > 0 
-      ? venueReviews.reduce((sum, r) => sum + r.rating, 0) / venueReviews.length 
-      : 0;
-    
-    await Venue.findByIdAndUpdate(venueId, {
-      rating: Math.round(avgRating * 10) / 10,
-      reviewCount: venueReviews.length
-    });
+    // Update target rating
+    await refreshTargetRating(
+      review.targetType || (activityVenueId ? 'activity_venue' : 'venue'),
+      activityVenueId || venueId
+    );
 
     res.json({
       success: true,

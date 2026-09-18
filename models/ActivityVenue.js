@@ -25,7 +25,14 @@ const activityVenueSchema = new mongoose.Schema({
   latitude: { type: Number },
   longitude: { type: Number },
   horaires: { type: String, trim: true },
+  // Indication libre de prix, renseignée par le partenaire ou l'admin
+  // (ex : « à partir de 2 000 FCFA/séance ») — affichée sur la fiche pour
+  // donner un repère au client. Pas un priceRange structuré.
+  priceIndication: { type: String, trim: true, maxlength: 200 },
   googleMapsUrl: { type: String, trim: true },
+  // Note moyenne des avis clients (calculée par routes/reviews.js)
+  rating: { type: Number, default: 0, min: 0, max: 5 },
+  reviewCount: { type: Number, default: 0 },
   submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   status: {
     type: String,

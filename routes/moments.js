@@ -1,10 +1,20 @@
 const express = require('express');
 const Itinerary = require('../models/Itinerary');
 const ActivityVenue = require('../models/ActivityVenue');
+const ActivityBooking = require('../models/ActivityBooking');
 const { composeMoment } = require('../services/momentEngine');
-const { auth, optionalAuth } = require('../middleware/auth');
+const { auth, optionalAuth, requireRole } = require('../middleware/auth');
+const kkiapay = require('../services/kkiapay');
 
 const router = express.Router();
+
+// Frais de mise en relation : 100 FCFA/personne, plafonné à 1 000 FCFA.
+// Ce frais rémunère l'organisation (génération du moment, sélection du lieu,
+// message pré-rempli) — PAS une réservation garantie (le prix et la
+// disponibilité se négocient en direct avec le partenaire sur WhatsApp).
+const LEAD_FEE_PER_PERSON = 100;
+const LEAD_FEE_MAX = 1000;
+const leadFee = (people) => Math.min(LEAD_FEE_MAX, Math.max(1, people) * LEAD_FEE_PER_PERSON);
 
 /**
  * POST /api/moments/activity
@@ -63,6 +73,193 @@ router.post('/activity', auth, async (req, res, next) => {
         momentType: 'activite'
       }
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/moments/activity/:itineraryId/lead-fee
+ * Crée (ou renvoie) l'ActivityBooking d'un moment d'activité : le client doit
+ * payer le frais de mise en relation pour débloquer le contact WhatsApp.
+ * Si un paiement 'paid' existe déjà pour ce moment, il est renvoyé tel quel
+ * (le client ne paie jamais deux fois le même moment).
+ */
+router.post('/activity/:itineraryId/lead-fee', auth, async (req, res, next) => {
+  try {
+    const itinerary = await Itinerary.findById(req.params.itineraryId);
+    if (!itinerary || itinerary.momentType !== 'activite') {
+      return res.status(404).json({ success: false, message: "Moment d'activité non trouvé" });
+    }
+    if (itinerary.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Accès refusé' });
+    }
+
+    const venueId = itinerary.steps.find((s) => s.activityVenueId)?.activityVenueId;
+    if (!venueId) {
+      return res.status(400).json({ success: false, message: 'Lieu introuvable sur ce moment' });
+    }
+
+    // Déjà payé ? On renvoie l'existant — pas de double facturation.
+    const existingPaid = await ActivityBooking.findOne({
+      itineraryId: itinerary._id,
+      status: 'paid',
+    });
+    if (existingPaid) {
+      return res.json({ success: true, alreadyPaid: true, activityBooking: existingPaid });
+    }
+
+    const amount = leadFee(itinerary.peopleCount || 1);
+    let booking = await ActivityBooking.findOne({
+      itineraryId: itinerary._id,
+      status: 'pending',
+    });
+    if (!booking) {
+      booking = await ActivityBooking.create({
+        userId: req.user._id,
+        itineraryId: itinerary._id,
+        activityVenueId: venueId,
+        amount,
+        peopleCount: itinerary.peopleCount || 1,
+        status: 'pending',
+        paymentStatus: 'pending',
+      });
+    }
+
+    res.status(201).json({ success: true, activityBooking: booking });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/moments/activity/lead-fee/:bookingId/verify
+ * Vérifie la transaction Kkiapay et débloque le contact WhatsApp.
+ */
+router.post('/activity/lead-fee/:bookingId/verify', auth, async (req, res, next) => {
+  try {
+    const { transactionId } = req.body;
+    const booking = await ActivityBooking.findById(req.params.bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Paiement non trouvé' });
+    }
+    if (booking.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Accès refusé' });
+    }
+    if (booking.status === 'paid') {
+      return res.json({ success: true, alreadyPaid: true, activityBooking: booking });
+    }
+    if (!transactionId) {
+      return res.status(400).json({ success: false, message: 'Transaction manquante' });
+    }
+
+    const transaction = await kkiapay.verifyTransaction(transactionId);
+    if (transaction.status !== 'success') {
+      booking.paymentStatus = 'failed';
+      await booking.save();
+      return res.status(400).json({ success: false, message: 'Paiement non confirmé' });
+    }
+
+    booking.status = 'paid';
+    booking.paymentStatus = 'paid';
+    booking.providerTransactionId = transactionId;
+    booking.paidAt = new Date();
+    await booking.save();
+
+    res.json({ success: true, activityBooking: booking });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/moments/activity/lead-fee/:bookingId/whatsapp-sent
+ * Traçage : le client a réellement cliqué sur le bouton WhatsApp. Sert à la
+ * politique de remboursement (partenaire injoignable → remboursement possible).
+ */
+router.post('/activity/lead-fee/:bookingId/whatsapp-sent', auth, async (req, res, next) => {
+  try {
+    const booking = await ActivityBooking.findById(req.params.bookingId);
+    if (!booking || booking.userId.toString() !== req.user._id.toString()) {
+      return res.status(404).json({ success: false, message: 'Paiement non trouvé' });
+    }
+    if (!booking.whatsappSentAt) {
+      booking.whatsappSentAt = new Date();
+      await booking.save();
+    }
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/moments/activity/lead-fee/status/:itineraryId
+ * Le client demande si son moment activité est déjà débloqué.
+ */
+router.get('/activity/lead-fee/status/:itineraryId', auth, async (req, res, next) => {
+  try {
+    const booking = await ActivityBooking.findOne({
+      itineraryId: req.params.itineraryId,
+      userId: req.user._id,
+    }).sort({ createdAt: -1 });
+    res.json({
+      success: true,
+      paid: !!booking && booking.status === 'paid',
+      activityBooking: booking || null,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/moments/activity/lead-fee/:bookingId/refund   (admin)
+ * Remboursement manuel : partenaire injoignable, litige. Appelle Kkiapay si
+ * la transaction est connue, marque remboursé dans tous les cas (traçable).
+ */
+router.post('/activity/lead-fee/:bookingId/refund', auth, requireRole('admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const booking = await ActivityBooking.findById(req.params.bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Paiement non trouvé' });
+    }
+    if (booking.status !== 'paid') {
+      return res.status(400).json({ success: false, message: 'Seul un paiement payé peut être remboursé' });
+    }
+    const reason = req.body.reason || 'Partenaire injoignable';
+    if (booking.providerTransactionId) {
+      try {
+        await kkiapay.refundTransaction(booking.providerTransactionId, booking.amount);
+      } catch (e) {
+        console.error('Remboursement Kkiapay échoué :', e.message);
+        // On marque remboursé quand même : le litige est tracé, l'admin
+        // rebasculera manuellement si Kkiapay refuse.
+      }
+    }
+    booking.status = 'refunded';
+    booking.paymentStatus = 'refunded';
+    booking.refundedAt = new Date();
+    booking.refundedBy = req.user._id;
+    booking.refundReason = reason;
+    await booking.save();
+    res.json({ success: true, activityBooking: booking });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/moments/activity/lead-fee/admin/all   (admin)
+ */
+router.get('/activity/lead-fee/admin/all', auth, requireRole('admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const bookings = await ActivityBooking.find({})
+      .populate('userId', 'firstName lastName phone email')
+      .populate('activityVenueId', 'name activity city phone')
+      .sort({ createdAt: -1 })
+      .limit(200);
+    res.json({ success: true, bookings });
   } catch (error) {
     next(error);
   }
