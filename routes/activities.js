@@ -59,6 +59,38 @@ router.get('/categories', (req, res) => {
 });
 
 /**
+ * GET /api/activities/my-requests   (partenaire)
+ * Les lieux d'activité du partenaire : ses demandes (pending/rejected)
+ * ET ses lieux publiés — pour la page « Mes lieux ».
+ * ⚠️ Déclaré AVANT /:id, sinon 'my-requests' est avalé par le paramètre.
+ */
+router.get('/my-requests', auth, requireRole('partner_owner', 'partner_manager'), async (req, res, next) => {
+  try {
+    const items = await ActivityVenue.find({ submittedBy: req.user._id })
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, activities: items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/activities/admin/pending
+ * Liste des soumissions en attente (admin). Idem : avant /:id.
+ */
+router.get('/admin/pending', auth, requireRole('admin', 'super_admin'), async (req, res, next) => {
+  try {
+    const items = await ActivityVenue.find({ status: 'pending' })
+      .populate('submittedBy', 'firstName lastName email phone')
+      .sort({ createdAt: -1 });
+    res.json({ success: true, activities: items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * GET /api/activities/:id
  * Détail d'un lieu d'activité approuvé.
  */
@@ -68,7 +100,11 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
     if (!item) {
       return res.status(404).json({ success: false, message: 'Activité non trouvée' });
     }
-    if (item.status !== 'approved' && !(req.user && ['admin', 'super_admin'].includes(req.user.role))) {
+    const isAdmin = req.user && ['admin', 'super_admin'].includes(req.user.role);
+    const isOwner = req.user && ['partner_owner', 'partner_manager'].includes(req.user.role)
+      && item.submittedBy
+      && String(item.submittedBy) === String(req.user._id);
+    if (item.status !== 'approved' && !isAdmin && !isOwner) {
       return res.status(403).json({ success: false, message: 'Accès refusé' });
     }
     res.json({ success: true, activity: item });
@@ -120,35 +156,6 @@ router.post('/', auth, requireRole('admin', 'super_admin', 'partner_owner', 'par
 });
 
 /**
- * GET /api/activities/my-requests   (partenaire)
- * Les demandes de lieux d'activité soumises par ce partenaire.
- */
-router.get('/my-requests', auth, requireRole('partner_owner', 'partner_manager'), async (req, res, next) => {
-  try {
-    const items = await ActivityVenue.find({ submittedBy: req.user._id })
-      .sort({ createdAt: -1 });
-    res.json({ success: true, activities: items });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * GET /api/activities/admin/pending
- * Liste des soumissions en attente (admin).
- */
-router.get('/admin/pending', auth, requireRole('admin', 'super_admin'), async (req, res, next) => {
-  try {
-    const items = await ActivityVenue.find({ status: 'pending' })
-      .populate('submittedBy', 'firstName lastName email phone')
-      .sort({ createdAt: -1 });
-    res.json({ success: true, activities: items });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
  * PUT /api/activities/:id/approve   (admin)
  */
 router.put('/:id/approve', auth, requireRole('admin', 'super_admin'), async (req, res, next) => {
@@ -182,12 +189,79 @@ router.put('/:id/reject', auth, requireRole('admin', 'super_admin'), async (req,
 });
 
 /**
- * DELETE /api/activities/:id   (admin)
+ * PUT /api/activities/:id
+ * - Admin : modification complète.
+ * - Partenaire : peut modifier les lieux QU'IL a soumis (même publiés).
+ *   Champs sensibles réservés à l'admin (status, source, submittedBy).
  */
-router.delete('/:id', auth, requireRole('admin', 'super_admin'), async (req, res, next) => {
+const ACTIVITY_PARTNER_FIELDS = [
+  'name', 'activity', 'description', 'address', 'district', 'city',
+  'phone', 'whatsapp', 'horaires', 'priceIndication', 'googleMapsUrl',
+  'latitude', 'longitude',
+];
+
+router.put('/:id', auth, async (req, res, next) => {
   try {
-    const item = await ActivityVenue.findByIdAndDelete(req.params.id);
+    const item = await ActivityVenue.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'Activité non trouvée' });
+
+    const role = req.user.role;
+    const isAdmin = ['admin', 'super_admin'].includes(role);
+    const isOwner = ['partner_owner', 'partner_manager'].includes(role)
+      && item.submittedBy
+      && String(item.submittedBy) === String(req.user._id);
+
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ success: false, message: 'Accès refusé' });
+    }
+
+    if (isAdmin) {
+      for (const key of Object.keys(req.body)) {
+        if (key === 'latitude' || key === 'longitude') {
+          item[key] = req.body[key] === null || req.body[key] === '' ? undefined : Number(req.body[key]);
+        } else if (key !== '_id' && key !== 'createdAt' && key !== 'updatedAt') {
+          item[key] = req.body[key];
+        }
+      }
+    } else {
+      for (const key of ACTIVITY_PARTNER_FIELDS) {
+        if (req.body[key] !== undefined) {
+          item[key] = key === 'latitude' || key === 'longitude'
+            ? (req.body[key] === null || req.body[key] === '' ? undefined : Number(req.body[key]))
+            : req.body[key];
+        }
+      }
+    }
+
+    await item.save({ validateBeforeSave: true });
+    res.json({ success: true, activity: item });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /api/activities/:id
+ * - Admin : suppression définitive.
+ * - Partenaire soumetteur : retire son lieu (suppression réelle — un lieu
+ *   d'activité est léger, pas d'historique de réservation lié).
+ */
+router.delete('/:id', auth, async (req, res, next) => {
+  try {
+    const item = await ActivityVenue.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: 'Activité non trouvée' });
+
+    const role = req.user.role;
+    const isAdmin = ['admin', 'super_admin'].includes(role);
+    const isOwner = ['partner_owner', 'partner_manager'].includes(role)
+      && item.submittedBy
+      && String(item.submittedBy) === String(req.user._id);
+
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ success: false, message: 'Accès refusé' });
+    }
+
+    await item.deleteOne();
     res.json({ success: true });
   } catch (error) {
     next(error);

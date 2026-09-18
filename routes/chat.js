@@ -38,31 +38,42 @@ router.get('/conversations', auth, async (req, res, next) => {
 
     // Get hidden conversations for this user
     const currentUser = await User.findById(userId).select('hiddenConversations blockedUsers');
-    const hiddenIds = (currentUser.hiddenConversations || []).map(id => id.toString());
+    const hiddenIds = new Set((currentUser.hiddenConversations || []).map(id => id.toString()));
 
-    // Populate user info for each conversation
-    const populated = await Promise.all(
-      conversations.map(async (conv) => {
-        const otherUserId = conv.lastMessage.sender.toString() === userId.toString()
-          ? conv.lastMessage.receiver
-          : conv.lastMessage.sender;
-        // Skip hidden conversations
-        if (hiddenIds.includes(otherUserId.toString())) return null;
-        const otherUser = await User.findById(otherUserId).select('firstName lastName role avatar avatar');
+    // Résolution des autres utilisateurs en UNE requête $in (au lieu d'un
+    // User.findById par conversation — c'était le goulot principal).
+    const otherIds = new Set();
+    for (const conv of conversations) {
+      const otherId = conv.lastMessage.sender.toString() === userId.toString()
+        ? conv.lastMessage.receiver.toString()
+        : conv.lastMessage.sender.toString();
+      if (!hiddenIds.has(otherId)) otherIds.add(otherId);
+    }
+    const otherUsers = otherIds.size > 0
+      ? await User.find({ _id: { $in: Array.from(otherIds) } }).select('firstName lastName role avatar')
+      : [];
+    const userMap = new Map(otherUsers.map(u => [u._id.toString(), u]));
 
-        return {
-          conversationId: conv._id,
-          otherUser,
-          lastMessage: {
-            content: conv.lastMessage.content,
-            createdAt: conv.lastMessage.createdAt,
-            sender: conv.lastMessage.sender,
-            attachments: conv.lastMessage.attachments || [],
-          },
-          unreadCount: conv.unreadCount,
-        };
-      })
-    );
+    const populated = conversations.map((conv) => {
+      const otherUserId = conv.lastMessage.sender.toString() === userId.toString()
+        ? conv.lastMessage.receiver.toString()
+        : conv.lastMessage.sender.toString();
+      // Skip hidden conversations
+      if (hiddenIds.has(otherUserId)) return null;
+      const otherUser = userMap.get(otherUserId);
+
+      return {
+        conversationId: conv._id,
+        otherUser,
+        lastMessage: {
+          content: conv.lastMessage.content,
+          createdAt: conv.lastMessage.createdAt,
+          sender: conv.lastMessage.sender,
+          attachments: conv.lastMessage.attachments || [],
+        },
+        unreadCount: conv.unreadCount,
+      };
+    });
 
     // Filter out nulls (hidden conversations)
     res.json({ success: true, conversations: populated.filter(Boolean) });
@@ -86,10 +97,12 @@ router.get('/messages/:conversationId', auth, async (req, res, next) => {
 
     const messages = await Message.find({ conversationId })
       .populate('sender', 'firstName lastName avatar role')
-      .populate('receiver', 'firstName lastName avatar role')
+      // receiver n'est pas utilisé côté client : on le retire pour alléger
+      // la requête (2 joins de moins par message sur 50 messages).
       .sort({ createdAt: -1 })
       .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .skip((page - 1) * limit)
+      .lean();
 
     res.json({ success: true, messages: messages.reverse() });
   } catch (error) {
@@ -522,35 +535,57 @@ router.get('/past-contacts', auth, async (req, res, next) => {
     // Remove self
     userIds.delete(userId.toString());
 
-    // Get user details for all contacts
-    const contacts = await Promise.all(
-      Array.from(userIds).map(async (contactId) => {
-        const user = await User.findById(contactId).select('firstName lastName role avatar');
-        if (!user) return null;
+    const contactIds = Array.from(userIds);
+    if (contactIds.length === 0) {
+      return res.json({ success: true, contacts: [] });
+    }
 
-        // Get last message with this contact
-        const conversationId = getConversationId(userId, contactId);
-        const lastMessage = await Message.findOne({ conversationId })
-          .sort({ createdAt: -1 })
-          .select('content createdAt sender attachments')
-          .lean();
+    // ═══ Récupération en 3 requêtes au lieu de 2 par contact (N+1) ═══
+    const contactIdsObj = contactIds.map(id => {
+      try { return new (require('mongoose').Types.ObjectId)(id); } catch { return null; }
+    }).filter(Boolean);
 
-        // Count total messages exchanged
-        const messageCount = await Message.countDocuments({ conversationId });
+    // 1) Tous les profils en une requête
+    const users = await User.find({ _id: { $in: contactIdsObj } })
+      .select('firstName lastName role avatar');
+    const userMap = new Map(users.map(u => [u._id.toString(), u]));
 
-        return {
-          user,
-          lastMessage: lastMessage ? {
-            content: lastMessage.content,
-            createdAt: lastMessage.createdAt,
-            sender: lastMessage.sender,
-            attachments: lastMessage.attachments || [],
-          } : null,
-          messageCount,
-          conversationId,
-        }
-      })
-    );
+    // 2) Dernier message PAR contact, en une seule agrégation
+    //    (dernier message de chaque conversationId impliqué)
+    const convIds = contactIds.map(contactId => getConversationId(userId, contactId));
+    const lastMessages = await Message.aggregate([
+      { $match: { conversationId: { $in: convIds } } },
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: '$conversationId', doc: { $first: '$$ROOT' } } }
+    ]);
+    const lastMsgMap = new Map(lastMessages.map(l => [l._id, l.doc]));
+
+    // 3) Comptage des messages en une seule agrégation
+    const counts = await Message.aggregate([
+      { $match: { conversationId: { $in: convIds } } },
+      { $group: { _id: '$conversationId', count: { $sum: 1 } } }
+    ]);
+    const countMap = new Map(counts.map(c => [c._id, c.count]));
+
+    const contacts = contactIds.map(contactId => {
+      const user = userMap.get(contactId);
+      if (!user) return null;
+
+      const conversationId = getConversationId(userId, contactId);
+      const lastMessage = lastMsgMap.get(conversationId);
+
+      return {
+        user,
+        lastMessage: lastMessage ? {
+          content: lastMessage.content,
+          createdAt: lastMessage.createdAt,
+          sender: lastMessage.sender,
+          attachments: lastMessage.attachments || [],
+        } : null,
+        messageCount: countMap.get(conversationId) || 0,
+        conversationId,
+      };
+    });
 
     // Sort by last message time (most recent first)
     const sorted = contacts

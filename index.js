@@ -221,6 +221,16 @@ if (require.main === module) {
     } catch (e) {
       console.warn('⚠️  Restauration des parties échouée (non bloquant) :', e.message);
     }
+    // Pool de packs de quiz pré-générés : parties de quiz instantanées.
+    // Non bloquant : le serveur écoute déjà, les packs arrivent en fond.
+    try {
+      const { warmQuizPool } = require('./games/quiz');
+      warmQuizPool().catch(e =>
+        console.warn('⚠️  Warm-up pool quiz échoué (non bloquant) :', e.message)
+      );
+    } catch (e) {
+      console.warn('⚠️  Warm-up pool quiz échoué (non bloquant) :', e.message);
+    }
     server.listen(port, () => {
       console.log(`Backend running on http://localhost:${port}`);
     });

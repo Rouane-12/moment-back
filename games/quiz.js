@@ -46,10 +46,13 @@ function shuffleIndices(n) {
 
 async function getUsedQuestionsText() {
   try {
+    // 40 (au lieu de 100) : suffit à écarter les redites récentes et divise
+    // par ~2,5 la taille du prompt → génération IA nettement plus rapide.
     const recentQuestions = await QuizQuestion.find({})
       .sort({ lastUsedAt: -1 })
-      .limit(100)
-      .select('text');
+      .limit(40)
+      .select('text')
+      .lean();
     return recentQuestions.map(q => q.text).join('\n- ');
   } catch (error) {
     console.error('Error fetching used questions:', error.message);
@@ -241,12 +244,9 @@ async function generateQuizPack(maxRetries = 3, level = null) {
     );
   }
 
-  // Clean up English questions from database before generating
-  try {
-    await cleanupEnglishQuestions();
-  } catch (error) {
-    console.error('Error during cleanup:', error.message);
-  }
+  // Nettoyage des questions anglaises déplacé au démarrage du serveur
+  // (warmQuizPool) : refaire un scan complet de la base à CHAQUE partie
+  // coûtait plusieurs centaines de ms inutiles.
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     console.log(`AI generation attempt ${attempt}/${maxRetries}`);
@@ -420,14 +420,28 @@ async function filterAndSaveQuestions(questions, source) {
   const filtered = [];
   const existingHashes = new Set();
   
-  // Fetch existing hashes from database
+  // Une SEULE requête pour les hashes existants (au lieu d'une requête
+  // par question dans la boucle : 20 allers-retours Mongo économisés).
   try {
-    const existingQuestions = await QuizQuestion.find({}).select('hash');
+    const existingQuestions = await QuizQuestion.find({}).select('hash').lean();
     existingQuestions.forEach(q => existingHashes.add(q.hash));
   } catch (error) {
     console.error('Error fetching existing hashes:', error.message);
   }
   
+  // Idem pour les textes récents : une seule requête pour toute la boucle.
+  let recentTexts = [];
+  try {
+    const recentQuestions = await QuizQuestion.find({})
+      .sort({ lastUsedAt: -1 })
+      .limit(50)
+      .select('text')
+      .lean();
+    recentTexts = recentQuestions.map(rq => rq.text);
+  } catch (error) {
+    console.error('Error fetching recent questions:', error.message);
+  }
+
   for (const q of questions) {
     const normalized = normalizeQuestion(q);
     
@@ -437,20 +451,6 @@ async function filterAndSaveQuestions(questions, source) {
       continue;
     }
     
-    // Check for semantic similarity with recent questions.
-    // Si la base est indisponible, on ne jette pas les questions de l'IA :
-    // on saute simplement la détection de similarité.
-    let recentTexts = [];
-    try {
-      const recentQuestions = await QuizQuestion.find({})
-        .sort({ lastUsedAt: -1 })
-        .limit(50)
-        .select('text');
-      recentTexts = recentQuestions.map(rq => rq.text);
-    } catch (error) {
-      console.error('Error fetching recent questions:', error.message);
-    }
-
     if (isSemanticSimilar(q.question, recentTexts, 0.7)) {
       console.log(`Skipping semantically similar question: ${q.question}`);
       continue;
@@ -467,12 +467,10 @@ async function filterAndSaveQuestions(questions, source) {
     filtered.push(...dbQuestions);
   }
   
-  // Save new questions to database
-  for (const q of filtered) {
-    if (!q._saved) {
-      await saveQuestionToDatabase(q, source);
-    }
-  }
+  // Sauvegarde en parallèle au lieu d'une à une (20 awaits → 1 batch)
+  await Promise.all(
+    filtered.filter(q => !q._saved).map(q => saveQuestionToDatabase(q, source))
+  );
   
   return filtered.slice(0, PACK_SIZE);
 }
@@ -629,6 +627,79 @@ async function fallbackPack(level = null) {
 // VIE DE LA PARTIE
 // ══════════════════════════════════════
 
+// ══════════════════════════════════════
+// POOL DE PACKS PRÉ-GÉNÉRÉS — démarrage instantané des parties
+// ══════════════════════════════════════
+// L'IA met 30-60 s à produire un pack : au lieu de faire attendre les
+// joueurs, on fabrique les packs À L'AVANCE (au démarrage du serveur puis
+// en tâche de fond après chaque partie). `createQuizGame` pioche un pack
+// prêt en quelques ms et en relance la fabrication d'un nouveau.
+
+const POOL_SIZE_PER_LEVEL = 1;      // packs prêts par niveau de difficulté
+const POOL_REGENERATE_DELAY_MS = 15000; // délai avant de re-remplir le pool
+const quizPackPool = new Map();     // level -> [pack, ...]
+const poolTimers = new Map();       // level -> timer de re-remplissage
+
+function getPool(level) {
+  if (!quizPackPool.has(level)) quizPackPool.set(level, []);
+  return quizPackPool.get(level);
+}
+
+function schedulePoolRefill(level, delay = POOL_REGENERATE_DELAY_MS) {
+  if (poolTimers.has(level)) clearTimeout(poolTimers.get(level));
+  const t = setTimeout(() => {
+    poolTimers.delete(level);
+    refillPool(level).catch(() => {});
+  }, delay);
+  poolTimers.set(level, t);
+}
+
+async function refillPool(level) {
+  const pool = getPool(level);
+  if (pool.length >= POOL_SIZE_PER_LEVEL) return; // déjà plein
+  try {
+    const pack = await generateQuizPack(2, level);
+    if (pack && pack.length >= PACK_SIZE) {
+      pool.push(pack);
+      console.log(`🧠 Pool quiz [${level || 'mixte'}] : ${pool.length} pack(s) prêt(s)`);
+    }
+  } catch (err) {
+    // IA indisponible : on retente plus tard (le fallback local reste là).
+    console.log(`🧠 Pool quiz [${level || 'mixte'}] : génération reportée (${err.message})`);
+    schedulePoolRefill(level, 60000);
+  }
+}
+
+/** Pioche un pack prêt du pool, sinon null. */
+function takePooledPack(level) {
+  const pool = getPool(level || 'mixte');
+  const pack = pool.shift();
+  if (pack) {
+    // Re-fabrique discrètement un nouveau pack en arrière-plan.
+    schedulePoolRefill(level || 'mixte');
+    return pack;
+  }
+  return null;
+}
+
+/**
+ * Chauffe le pool au démarrage du serveur : 1 pack par niveau demandable.
+ * Non bloquant — le serveur démarre normalement, les packs arrivent en fond.
+ */
+async function warmQuizPool() {
+  // Nettoyage initial des questions anglaises (une seule fois au boot).
+  try { await cleanupEnglishQuestions(); } catch (e) {
+    console.error('Cleanup questions anglaises :', e.message);
+  }
+  const levels = ['facile', 'moyen', 'difficile', 'tres_difficile', null];
+  for (const level of levels) {
+    const key = level || 'mixte';
+    if (!quizPackPool.has(key)) quizPackPool.set(key, []);
+  }
+  await Promise.allSettled(levels.map(l => refillPool(l)));
+  console.log('🧠 Pool de quiz pré-générés initialisé');
+}
+
 function createQuizGame(p1, p2, io, level = null) {
   // Accepte aussi un tableau de joueurs (quiz multijoueur 2 à 8 joueurs)
   const players = Array.isArray(p1) ? [...p1] : [p1, p2];
@@ -661,15 +732,22 @@ function createQuizGame(p1, p2, io, level = null) {
     game.lastResult[p] = null;
   }
 
-  // Génération UNE seule fois, en arrière-plan. Le jeu est créé immédiatement
-  // (la carte d'invitation s'affiche), puis le pack arrive quand il est prêt.
-  generateQuizPack(3, level)
-    .then(pack => onPackReady(game, io, pack))
-    .catch(async (err) => {
-      console.error('🧠 Génération IA indisponible, pack de secours :', err.message);
-      const fallback = await fallbackPack(level);
-      onPackReady(game, io, fallback);
-    });
+  // Pack prêt du pool → démarrage instantané. Sinon génération IA en
+  // arrière-plan (la carte d'invitation s'affiche dès maintenant) avec
+  // fallback local en cas d'échec.
+  const pooled = takePooledPack(level);
+  if (pooled) {
+    console.log('🧠 Pack servi depuis le pool (démarrage instantané)');
+    onPackReady(game, io, pooled);
+  } else {
+    generateQuizPack(2, level)
+      .then(pack => onPackReady(game, io, pack))
+      .catch(async (err) => {
+        console.error('🧠 Génération IA indisponible, pack de secours :', err.message);
+        const fallback = await fallbackPack(level);
+        onPackReady(game, io, fallback);
+      });
+  }
 
   return game;
 }
@@ -882,6 +960,7 @@ module.exports = {
   emitQuizState,
   clearQuizTimers,
   generateQuizPack,
+  warmQuizPool,
   // Exposés pour les tests
   FALLBACK_BANK,
   TIERS,

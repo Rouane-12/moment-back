@@ -153,11 +153,30 @@ router.post('/activity/lead-fee/:bookingId/verify', auth, async (req, res, next)
       return res.status(400).json({ success: false, message: 'Transaction manquante' });
     }
 
-    const transaction = await kkiapay.verifyTransaction(transactionId);
-    if (transaction.status !== 'success') {
-      booking.paymentStatus = 'failed';
+    // Vérification Kkiapay tolérante : le widget peut payer en sandbox
+    // pendant que le backend est en prod (et inversement). Si Kkiapay est
+    // injoignable ou introuvable (404 sandbox/prod), on ne bloque pas le
+    // client — même comportement que le flux de référencement partenaire.
+    let verified = false;
+    try {
+      const transaction = await kkiapay.verifyTransaction(transactionId);
+      verified = kkiapay.isSuccessfulStatus(transaction.status);
+    } catch (verifyError) {
+      console.error('Kkiapay verification error (lead-fee):', verifyError.message);
+    }
+    if (!verified) {
+      // On garde le transactionId pour pouvoir re-vérifier plus tard via
+      // /status/:itineraryId (auto-réparation), et on ne marque PAS failed.
+      if (!booking.providerTransactionId) {
+        booking.providerTransactionId = transactionId;
+      }
+      booking.paymentStatus = 'pending';
       await booking.save();
-      return res.status(400).json({ success: false, message: 'Paiement non confirmé' });
+      return res.status(400).json({
+        success: false,
+        message: 'Paiement en cours de vérification. Réessaie dans un instant.',
+        pendingVerification: true,
+      });
     }
 
     booking.status = 'paid';
@@ -199,10 +218,27 @@ router.post('/activity/lead-fee/:bookingId/whatsapp-sent', auth, async (req, res
  */
 router.get('/activity/lead-fee/status/:itineraryId', auth, async (req, res, next) => {
   try {
-    const booking = await ActivityBooking.findOne({
+    let booking = await ActivityBooking.findOne({
       itineraryId: req.params.itineraryId,
       userId: req.user._id,
     }).sort({ createdAt: -1 });
+
+    // Auto-réparation : si une vérification précédente a échoué (Kkiapay
+    // injoignable / décalage sandbox), on retente maintenant.
+    if (booking && booking.status === 'pending' && booking.providerTransactionId) {
+      try {
+        const transaction = await kkiapay.verifyTransaction(booking.providerTransactionId);
+        if (kkiapay.isSuccessfulStatus(transaction.status)) {
+          booking.status = 'paid';
+          booking.paymentStatus = 'paid';
+          booking.paidAt = new Date();
+          await booking.save();
+        }
+      } catch (e) {
+        // Kkiapay encore injoignable : on rend simplement l'état courant.
+      }
+    }
+
     res.json({
       success: true,
       paid: !!booking && booking.status === 'paid',
