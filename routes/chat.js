@@ -61,6 +61,10 @@ router.get('/conversations', auth, async (req, res, next) => {
       // Skip hidden conversations
       if (hiddenIds.has(otherUserId)) return null;
       const otherUser = userMap.get(otherUserId);
+      // Utilisateur supprimé depuis l'échange : on masque la conversation
+      // plutôt que de renvoyer otherUser: undefined (crash côté client sur
+      // otherUser.firstName).
+      if (!otherUser) return null;
 
       return {
         conversationId: conv._id,
