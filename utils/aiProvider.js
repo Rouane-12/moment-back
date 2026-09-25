@@ -106,12 +106,18 @@ async function postJson(url, headers, body, timeoutMs) {
   }
 }
 
+// Modèles retirés à l'exécution après un 404 (dépréciés pour ce compte) :
+// on ne les retente plus jamais — évite une requête perdue + un message
+// d'erreur trompeur à CHAQUE appel.
+const deadModels = new Set();
+
 async function geminiGenerate({ systemPrompt, userPrompt, temperature, maxTokens, json }) {
   const key = getGeminiKey();
   if (!key) throw new Error('GEMINI_API_KEY absente');
 
   let lastError = null;
   for (const model of GEMINI_MODELS) {
+    if (deadModels.has(model)) continue; // retiré précédemment : on saute
     try {
       const body = {
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
@@ -141,8 +147,13 @@ async function geminiGenerate({ systemPrompt, userPrompt, temperature, maxTokens
       return text;
     } catch (err) {
       lastError = err;
-      // Modèle inexistant / retiré → on essaie le suivant sans bruit.
-      if (err.status === 404) continue;
+      // Modèle inexistant / retiré pour ce compte → on l'enter définitivement
+      // et on essaie le suivant sans bruit.
+      if (err.status === 404) {
+        deadModels.add(model);
+        console.log(`🪦 Modèle Gemini ${model} indisponible (404) — retiré de la rotation`);
+        continue;
+      }
       // 503 (surcharge) ou 429 (quota) → on essaie aussi le suivant.
       if (err.status === 503 || err.status === 429) continue;
       break;

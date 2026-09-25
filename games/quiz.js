@@ -84,13 +84,20 @@ function isFrenchQuestion(question) {
     return false;
   }
 
-  // Rejet si des mots anglais courants apparaissent dans les réponses
-  const englishWordsInAnswers = ['the ', ' an ', ' and ', ' is ', ' are ', ' was ', ' were ', ' has ', ' have ', ' had ', ' can ', ' will ', ' does ', ' did ', ' do ', ' for ', ' from ', ' with ', ' that ', ' this ', ' these ', ' those ', 'historic', 'landmarks', 'documentaries', 'abandoned', 'buildings', 'malls', 'action', 'films', 'liver', 'pancreas', 'stomach', 'gallbladder', 'produces', 'typically', 'focus'];
-  for (const word of englishWordsInAnswers) {
-    if (allText.includes(word)) {
-      console.log(`REJECTED (English word found in answers): ${question.question}`);
-      return false;
-    }
+  // Rejet si des mots anglais courants apparaissent dans les réponses.
+  // ⚠️ On vérifie des MOTS ENTIERS (\b...\b), jamais des sous-chaînes :
+  // « the » isolé matchait l'intérieur de mots français valides comme
+  // « Goethe », « Athènes », « Fort-de-France »… et rejetait des questions
+  // parfaitement françaises (faux positifs massifs → packs jetés).
+  const englishWordsInAnswers = [
+    'the', 'and', 'with', 'from', 'was', 'were', 'has', 'have', 'had',
+    'landmarks', 'documentaries', 'abandoned', 'buildings', 'malls',
+    'liver', 'pancreas', 'stomach', 'gallbladder', 'produces', 'typically',
+  ];
+  const englishRe = new RegExp(`\\b(${englishWordsInAnswers.join('|')})\\b`, 'i');
+  if (englishRe.test(allText)) {
+    console.log(`REJECTED (English word found in answers): ${question.question}`);
+    return false;
   }
 
   // Vérifie que la question contient au moins un mot français courant
@@ -696,8 +703,18 @@ async function warmQuizPool() {
     const key = level || 'mixte';
     if (!quizPackPool.has(key)) quizPackPool.set(key, []);
   }
-  await Promise.allSettled(levels.map(l => refillPool(l)));
-  console.log('🧠 Pool de quiz pré-générés initialisé');
+  // Séquentiel (et non parallèle) : 5 générations simultanées saturent le
+  // quota Gemini (429) et mettent en échec tout le warm-up. En séquence,
+  // chaque pack part du provider réellement disponible.
+  for (const level of levels) {
+    try {
+      await refillPool(level);
+    } catch (e) {
+      // refillPool gère déjà ses erreurs (report auto).
+    }
+  }
+  const ready = [...quizPackPool.values()].reduce((n, arr) => n + arr.length, 0);
+  console.log(`🧠 Pool de quiz pré-générés initialisé — ${ready} pack(s) prêt(s)`);
 }
 
 function createQuizGame(p1, p2, io, level = null) {
